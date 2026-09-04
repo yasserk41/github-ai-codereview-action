@@ -1,0 +1,30 @@
+{
+  "name": "ai-codereview-action",
+  "description": "AI-powered code review with inline PR comments. Supports OpenAI, Anthropic, z.ai, Kimi, and OpenAI-compatible endpoints.",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "ncc build src/main.ts -o dist --license licenses.txt",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@actions/core": "^3.0.1",
+    "@actions/github": "^9.1.1",
+    "@anthropic-ai/sdk": "^0.123.0",
+    "minimatch": "^10.2.6",
+    "openai": "^7.10.0",
+    "yaml": "^2.9.0",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@octokit/core": "^7.0.8",
+    "@types/node": "^26.4.1",
+    "@vercel/ncc": "^0.45.0",
+    "eslint": "^10.10.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.69.0",
+    "vitest": "^5.0.0"
+  }
+}

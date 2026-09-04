@@ -1,0 +1,39 @@
+name: 'AI Code Review'
+description: 'AI-powered code review with inline PR comments. Supports OpenAI, Anthropic, z.ai, Kimi, and OpenAI-compatible endpoints.'
+author: 'yasserk41'
+branding:
+  icon: 'eye'
+  color: 'purple'
+inputs:
+  provider:
+    description: 'AI provider: openai | anthropic | zai | kimi | custom'
+    required: false
+    default: 'openai'
+  model:
+    description: 'Model name (defaults per provider: gpt-4.1, claude-sonnet-4-5, glm-4.6, kimi-k2)'
+    required: false
+    default: ''
+  base-url:
+    description: 'Required for provider "custom": OpenAI-compatible base URL'
+    required: false
+    default: ''
+  context-window:
+    description: 'Model context window in tokens (custom provider only; others use known values)'
+    required: false
+    default: '128000'
+  github-token:
+    description: 'Token used to read the PR and post the review'
+    required: false
+    default: '${{ github.token }}'
+  config-path:
+    description: 'Path to the .ai-review.yml config file in the reviewed repo'
+    required: false
+    default: '.ai-review.yml'
+outputs:
+  findings-count:
+    description: 'Total findings reported'
+  inline-comments:
+    description: 'Number of inline comments posted'
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
