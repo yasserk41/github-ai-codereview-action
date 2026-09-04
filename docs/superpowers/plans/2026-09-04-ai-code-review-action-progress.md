@@ -6,8 +6,9 @@ Orchestrator: opencode (reviews + commits)
 
 | Task | Status | Commit | Notes |
 |---|---|---|---|
-| 1 scaffold + CI | reviewed, landing | | files matched plan; deps installed + 2 plan-bug fixes by orchestrator (eslint.config.mjs, tsconfig Node16) |
-| 2 types | queued | | |
+| 1 scaffold + CI | done | dba92df | files matched plan; orchestrator installed deps + fixed 2 plan bugs (eslint.config.mjs, tsconfig Node16) |
+| 2 types | done | 246274c | verbatim per plan; 8 tests |
+| 3 config | done | (pending) | 3 plan-bug corrections by orchestrator: action.yml context-window default '' (else it always overrode provider presets), core.getInput kept as default (pinned @actions/core@1.11.1/@actions/github@6.0.1 - v3/v9 are ESM-only, incompatible with ncc CJS), readonly arrays + ConfigError re-export kept (agy reconciliations of plan test inconsistencies) |
 | 3 config | queued | | |
 | 4 diff | queued | | |
 | 5 prompts | queued | | |
