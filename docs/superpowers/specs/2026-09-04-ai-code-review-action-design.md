@@ -61,8 +61,11 @@ Each module has one responsibility; `main.ts` only orchestrates.
 
 ```ts
 interface ReviewProvider {
-  review(diff: DiffContext, config: ReviewConfig): Promise<Finding[]>
+  complete(system: string, user: string): Promise<Finding[]>
 }
+```
+
+Adapters are pure LLM callers; prompt building lives in the orchestration (`review.ts`) so every adapter shares it.
 
 interface Finding {
   file: string        // path as it appears in the diff
@@ -128,7 +131,7 @@ Precedence: action inputs > config file > built-in defaults. Missing config file
 
 - All comments posted as **one PR review** (`pulls.createReview`) with inline comments in a single API call — one bot review per push, not scattered comments
 - Review body = summary: verdict counts by severity, findings table, model/provider attribution
-- On each new push, the bot finds its own previous review on the PR and **dismisses it as stale**, so findings never pile up across pushes
+- Before posting, the bot deletes its own previous inline comments on the PR (tagged with a hidden HTML marker), so findings never pile up across pushes — GitHub's API cannot dismiss `COMMENT`-type reviews
 - `max-comments` caps inline comments; overflow findings appear in the summary table with `file:line` links; lowest severities are dropped first
 - No findings → short "LGTM" review body, no inline comments
 
