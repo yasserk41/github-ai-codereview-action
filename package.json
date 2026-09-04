@@ -19,7 +19,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@octokit/core": "^7.0.8",
+    "@octokit/core": "^5.2.2",
     "@types/node": "^26.4.1",
     "@vercel/ncc": "^0.45.0",
     "eslint": "^10.10.0",
