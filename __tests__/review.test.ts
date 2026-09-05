@@ -56,6 +56,8 @@ const raw: RawInputs = {
   contextWindow: '128000',
   githubToken: 't',
   configPath: '.ai-review.yml',
+  verdict: 'comment',
+  requestChangesOn: 'critical',
 }
 
 const repoConfig: RepoConfig = {
@@ -66,13 +68,13 @@ const repoConfig: RepoConfig = {
   severityThreshold: 'suggestion',
 }
 
-function deps(provider: ReviewProvider, octokit: Octokit) {
+function deps(provider: ReviewProvider, octokit: Octokit, rawOverrides: Partial<RawInputs> = {}) {
   return {
     octokit,
     repo: { owner: 'o', repo: 'r' },
     prNumber: 5,
     pr: { title: 'Add feature', body: 'desc' },
-    raw,
+    raw: { ...raw, ...rawOverrides },
     repoConfig,
     provider,
   }
@@ -82,7 +84,7 @@ describe('runReview', () => {
   it('posts a review with inline comments for anchored findings and cleans stale ones', async () => {
     const { octokit, createReview, deleteReviewComment } = fakeOctokit()
     const result = await runReview(deps(fakeProvider([finding]), octokit))
-    expect(result).toEqual({ findingsCount: 1, inlineCount: 1, summaryOnlyCount: 0 })
+    expect(result).toEqual({ findingsCount: 1, inlineCount: 1, summaryOnlyCount: 0, verdict: 'commented' })
     expect(deleteReviewComment).toHaveBeenCalledWith({
       owner: 'o',
       repo: 'r',
@@ -99,7 +101,7 @@ describe('runReview', () => {
   it('posts an LGTM summary when the provider returns no findings', async () => {
     const { octokit, createReview } = fakeOctokit()
     const result = await runReview(deps(fakeProvider([]), octokit))
-    expect(result).toEqual({ findingsCount: 0, inlineCount: 0, summaryOnlyCount: 0 })
+    expect(result).toEqual({ findingsCount: 0, inlineCount: 0, summaryOnlyCount: 0, verdict: 'commented' })
     expect(createReview.mock.calls[0][0].body.toLowerCase()).toContain('lgtm')
   })
 
@@ -107,7 +109,7 @@ describe('runReview', () => {
     const { octokit, createReview } = fakeOctokit()
     const stray = { ...finding, file: 'nope.ts', line: 42 }
     const result = await runReview(deps(fakeProvider([stray]), octokit))
-    expect(result).toEqual({ findingsCount: 1, inlineCount: 0, summaryOnlyCount: 1 })
+    expect(result).toEqual({ findingsCount: 1, inlineCount: 0, summaryOnlyCount: 1, verdict: 'commented' })
     expect(createReview.mock.calls[0][0].comments).toEqual([])
     expect(createReview.mock.calls[0][0].body).toContain('nope.ts#L42')
   })
@@ -120,7 +122,28 @@ describe('runReview', () => {
     } as unknown as Octokit
     const result = await runReview(deps(fakeProvider([]), octokit))
     expect(result.findingsCount).toBe(0)
+    expect(result.verdict).toBe('commented')
     expect(createReview).toHaveBeenCalledTimes(1)
     expect(createReview.mock.calls[0][0].body).toContain('No reviewable files')
+  })
+
+  it('submits REQUEST_CHANGES and returns verdict changes-requested for critical findings in auto mode', async () => {
+    const { octokit, createReview } = fakeOctokit()
+    const result = await runReview(deps(fakeProvider([finding]), octokit, { verdict: 'auto' }))
+    expect(result).toEqual({ findingsCount: 1, inlineCount: 1, summaryOnlyCount: 0, verdict: 'changes-requested' })
+    expect(createReview).toHaveBeenCalledTimes(1)
+    const review = createReview.mock.calls[0][0]
+    expect(review.event).toBe('REQUEST_CHANGES')
+    expect(review.comments[0].path).toBe('src/app.ts')
+  })
+
+  it('submits APPROVE and returns verdict approved for zero findings in auto mode', async () => {
+    const { octokit, createReview } = fakeOctokit()
+    const result = await runReview(deps(fakeProvider([]), octokit, { verdict: 'auto' }))
+    expect(result).toEqual({ findingsCount: 0, inlineCount: 0, summaryOnlyCount: 0, verdict: 'approved' })
+    expect(createReview).toHaveBeenCalledTimes(1)
+    const review = createReview.mock.calls[0][0]
+    expect(review.event).toBe('APPROVE')
+    expect(review.comments).toEqual([])
   })
 })

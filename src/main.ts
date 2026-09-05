@@ -36,6 +36,7 @@ async function run(): Promise<void> {
   })
   core.setOutput('findings-count', String(result.findingsCount))
   core.setOutput('inline-comments', String(result.inlineCount))
+  core.setOutput('verdict', result.verdict)
 }
 
 run().catch((err) => {

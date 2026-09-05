@@ -64,6 +64,8 @@ The following inputs are defined in `action.yml`:
 | `context-window` | Model context window in tokens (custom provider only; others use known values) | No | `''` |
 | `github-token` | Token used to read the PR and post the review | No | `${{ github.token }}` |
 | `config-path` | Path to the `.ai-review.yml` config file in the reviewed repo | No | `'.ai-review.yml'` |
+| `verdict` | Review submission mode: `comment` (always COMMENT) \| `auto` (approve when clean, request changes when severe findings) | No | `'comment'` |
+| `request-changes-on` | Minimum severity that triggers REQUEST_CHANGES when verdict is auto: `critical` \| `warning` \| `suggestion` | No | `'critical'` |
 
 ---
 
@@ -73,6 +75,7 @@ The following inputs are defined in `action.yml`:
 |---|---|
 | `findings-count` | Total findings reported |
 | `inline-comments` | Number of inline comments posted |
+| `verdict` | Submitted review verdict: `approved` \| `changes-requested` \| `commented` |
 
 ---
 
@@ -107,7 +110,8 @@ custom-instructions: |         # appended to the system prompt
 
 ## Behavior Notes
 
-- **One review per push:** Findings and verdict summaries are submitted as a single pull request review (`COMMENT` event), keeping PR timelines organized and avoiding noise.
+- **One review per push:** Findings and verdict summaries are submitted as a single pull request review, keeping PR timelines organized and avoiding noise.
+- **Verdicts:** When `verdict` is set to `auto`, the action submits `APPROVE` if no issues are found, `REQUEST_CHANGES` if findings meet or exceed the `request-changes-on` threshold, or `COMMENT` otherwise. Due to GitHub limitations, approvals submitted with `GITHUB_TOKEN` do not satisfy branch-protection required-approval counts, though `REQUEST_CHANGES` does block merges.
 - **Stale comment cleanup:** When a new commit is pushed to an open pull request (`synchronize`), the action deletes any previous inline comments it left on earlier pushes before posting the new review.
 - **Diff truncation for large PRs:** For large changes exceeding ~70% of the model's context window, non-essential files are skipped first and remaining diffs are truncated. A clear truncation warning is included in the summary body so reviews remain transparent.
 - **Empty-findings LGTM:** When no issues meet or exceed the severity threshold, the action submits a friendly "LGTM — no issues found" summary review without posting empty comments.

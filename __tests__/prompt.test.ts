@@ -9,6 +9,8 @@ const baseConfig: ReviewConfig = {
   maxComments: 20,
   reviewStyle: 'high-signal',
   severityThreshold: 'suggestion',
+  verdict: 'comment',
+  requestChangesOn: 'critical',
 }
 
 const sampleDiff: DiffContext = {

@@ -2,7 +2,7 @@ import * as core from '@actions/core'
 import { readFile } from 'node:fs/promises'
 import { parse as parseYaml } from 'yaml'
 import { z } from 'zod'
-import { ConfigError, type ReviewConfig, type Severity } from './providers/types'
+import { ConfigError, SEVERITIES, type ReviewConfig, type Severity } from './providers/types'
 
 export { ConfigError }
 
@@ -33,6 +33,8 @@ export interface RawInputs {
   contextWindow: string
   githubToken: string
   configPath: string
+  verdict: string
+  requestChangesOn: string
 }
 
 export async function loadRepoConfig(path: string): Promise<RepoConfig> {
@@ -82,6 +84,8 @@ export function readRawInputs(
     contextWindow: getInput('context-window') || '',
     githubToken: getInput('github-token'),
     configPath: getInput('config-path') || '.ai-review.yml',
+    verdict: getInput('verdict') || 'comment',
+    requestChangesOn: getInput('request-changes-on') || 'critical',
   }
 }
 
@@ -90,6 +94,12 @@ export function resolveConfig(
   repo: RepoConfig,
   preset: { defaultModel: string; contextWindowTokens: number },
 ): ReviewConfig {
+  const verdict = raw.verdict === 'auto' ? 'auto' : 'comment'
+  const requestChangesOn: Severity = (SEVERITIES as readonly string[]).includes(
+    raw.requestChangesOn,
+  )
+    ? (raw.requestChangesOn as Severity)
+    : 'critical'
   return {
     provider: raw.provider,
     model: raw.model || preset.defaultModel,
@@ -100,5 +110,7 @@ export function resolveConfig(
     reviewStyle: repo.reviewStyle,
     severityThreshold: repo.severityThreshold,
     customInstructions: repo.customInstructions,
+    verdict,
+    requestChangesOn,
   }
 }

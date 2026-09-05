@@ -9,6 +9,7 @@ import {
   cleanupPreviousComments,
   filterFindings,
   postReview,
+  resolveVerdict,
 } from './comment'
 import { buildSystemPrompt, buildUserPrompt } from './prompt'
 import { createProvider, getPreset } from './providers/registry'
@@ -28,6 +29,7 @@ export interface ReviewResult {
   findingsCount: number
   inlineCount: number
   summaryOnlyCount: number
+  verdict: 'approved' | 'changes-requested' | 'commented'
 }
 
 export async function runReview(deps: ReviewDeps): Promise<ReviewResult> {
@@ -41,6 +43,8 @@ export async function runReview(deps: ReviewDeps): Promise<ReviewResult> {
   let inline: ReturnType<typeof filterFindings>['inline'] = []
   let summaryOnly: ReturnType<typeof filterFindings>['summaryOnly'] = []
   let body: string
+  let event: 'COMMENT' | 'REQUEST_CHANGES' | 'APPROVE' = 'COMMENT'
+  let verdict: 'approved' | 'changes-requested' | 'commented' = 'commented'
 
   if (diff.files.length === 0) {
     body = [
@@ -58,14 +62,23 @@ export async function runReview(deps: ReviewDeps): Promise<ReviewResult> {
     inline = filtered.inline
     summaryOnly = filtered.summaryOnly
     body = buildSummaryBody(filtered, diff, config)
+    event = resolveVerdict(filtered, config)
+    if (event === 'APPROVE') {
+      verdict = 'approved'
+    } else if (event === 'REQUEST_CHANGES') {
+      verdict = 'changes-requested'
+    } else {
+      verdict = 'commented'
+    }
   }
 
   await cleanupPreviousComments(deps.octokit, deps.repo, deps.prNumber)
-  await postReview(deps.octokit, deps.repo, deps.prNumber, body, inline)
+  await postReview(deps.octokit, deps.repo, deps.prNumber, body, event, inline)
 
   return {
     findingsCount: inline.length + summaryOnly.length,
     inlineCount: inline.length,
     summaryOnlyCount: summaryOnly.length,
+    verdict,
   }
 }

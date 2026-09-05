@@ -18,6 +18,8 @@ function raw(overrides: Partial<RawInputs> = {}): RawInputs {
     contextWindow: '128000',
     githubToken: 't',
     configPath: '.ai-review.yml',
+    verdict: 'comment',
+    requestChangesOn: 'critical',
     ...overrides,
   }
 }

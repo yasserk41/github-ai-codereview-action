@@ -133,11 +133,30 @@ export async function cleanupPreviousComments(
   return deleted
 }
 
+export function resolveVerdict(
+  filtered: FilteredFindings,
+  config: ReviewConfig,
+): 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT' {
+  if (config.verdict !== 'auto') {
+    return 'COMMENT'
+  }
+  const all = [...filtered.inline, ...filtered.summaryOnly]
+  if (all.length === 0) {
+    return 'APPROVE'
+  }
+  const thresholdRank = SEVERITY_RANK[config.requestChangesOn]
+  if (all.some((f) => SEVERITY_RANK[f.severity] >= thresholdRank)) {
+    return 'REQUEST_CHANGES'
+  }
+  return 'COMMENT'
+}
+
 export async function postReview(
   octokit: Octokit,
   repo: { owner: string; repo: string },
   prNumber: number,
   body: string,
+  event: 'COMMENT' | 'REQUEST_CHANGES' | 'APPROVE',
   inline: Finding[],
 ): Promise<void> {
   const client = octokit as unknown as OctokitClient
@@ -145,13 +164,16 @@ export async function postReview(
     owner: repo.owner,
     repo: repo.repo,
     pull_number: prNumber,
-    event: 'COMMENT',
+    event,
     body,
-    comments: inline.map((f) => ({
-      path: f.file,
-      line: f.line,
-      side: 'RIGHT' as const,
-      body: `${COMMENT_MARKER}\n**[${f.severity.toUpperCase()}] ${f.title}**\n\n${f.body}`,
-    })),
+    comments:
+      event === 'APPROVE'
+        ? []
+        : inline.map((f) => ({
+            path: f.file,
+            line: f.line,
+            side: 'RIGHT' as const,
+            body: `${COMMENT_MARKER}\n**[${f.severity.toUpperCase()}] ${f.title}**\n\n${f.body}`,
+          })),
   })
 }

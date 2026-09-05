@@ -29,11 +29,21 @@ inputs:
     description: 'Path to the .ai-review.yml config file in the reviewed repo'
     required: false
     default: '.ai-review.yml'
+  verdict:
+    description: 'Review submission mode: comment (always COMMENT) | auto (approve when clean, request changes when severe findings)'
+    required: false
+    default: 'comment'
+  request-changes-on:
+    description: 'Minimum severity that triggers REQUEST_CHANGES when verdict is auto: critical | warning | suggestion'
+    required: false
+    default: 'critical'
 outputs:
   findings-count:
     description: 'Total findings reported'
   inline-comments:
     description: 'Number of inline comments posted'
+  verdict:
+    description: 'Submitted review verdict: approved | changes-requested | commented'
 runs:
   using: 'node20'
   main: 'dist/index.js'

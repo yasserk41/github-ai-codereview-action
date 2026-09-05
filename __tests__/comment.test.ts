@@ -5,6 +5,7 @@ import {
   cleanupPreviousComments,
   filterFindings,
   postReview,
+  resolveVerdict,
 } from '../src/comment'
 import { COMMENT_MARKER, type DiffContext, type Finding, type ReviewConfig } from '../src/providers/types'
 
@@ -15,6 +16,8 @@ const config: ReviewConfig = {
   maxComments: 2,
   reviewStyle: 'high-signal',
   severityThreshold: 'suggestion',
+  verdict: 'comment',
+  requestChangesOn: 'critical',
 }
 
 const diff: DiffContext = {
@@ -118,13 +121,56 @@ describe('cleanupPreviousComments', () => {
   })
 })
 
+describe('resolveVerdict', () => {
+  it('returns COMMENT when verdict mode is not auto', () => {
+    expect(resolveVerdict({ inline: [], summaryOnly: [] }, { ...config, verdict: 'comment' })).toBe('COMMENT')
+    expect(
+      resolveVerdict(
+        { inline: [finding('critical')], summaryOnly: [] },
+        { ...config, verdict: 'comment' },
+      ),
+    ).toBe('COMMENT')
+  })
+
+  it('returns APPROVE in auto mode when there are no findings', () => {
+    expect(resolveVerdict({ inline: [], summaryOnly: [] }, { ...config, verdict: 'auto' })).toBe('APPROVE')
+  })
+
+  it('returns COMMENT in auto mode when findings do not meet request-changes-on threshold', () => {
+    expect(
+      resolveVerdict(
+        { inline: [finding('suggestion')], summaryOnly: [] },
+        { ...config, verdict: 'auto', requestChangesOn: 'critical' },
+      ),
+    ).toBe('COMMENT')
+  })
+
+  it('returns REQUEST_CHANGES in auto mode when finding meets critical threshold', () => {
+    expect(
+      resolveVerdict(
+        { inline: [finding('critical')], summaryOnly: [] },
+        { ...config, verdict: 'auto', requestChangesOn: 'critical' },
+      ),
+    ).toBe('REQUEST_CHANGES')
+  })
+
+  it('returns REQUEST_CHANGES in auto mode for warning when request-changes-on is warning', () => {
+    expect(
+      resolveVerdict(
+        { inline: [finding('warning')], summaryOnly: [] },
+        { ...config, verdict: 'auto', requestChangesOn: 'warning' },
+      ),
+    ).toBe('REQUEST_CHANGES')
+  })
+})
+
 describe('postReview', () => {
   it('posts one COMMENT review with RIGHT-side inline comments', async () => {
     const createReview = vi.fn()
     const octokit = {
       rest: { pulls: { createReview } },
     } as unknown as Octokit
-    await postReview(octokit, { owner: 'o', repo: 'r' }, 5, 'body', [finding('critical')])
+    await postReview(octokit, { owner: 'o', repo: 'r' }, 5, 'body', 'COMMENT', [finding('critical')])
     expect(createReview).toHaveBeenCalledWith({
       owner: 'o',
       repo: 'r',
@@ -139,6 +185,45 @@ describe('postReview', () => {
           body: expect.stringContaining(COMMENT_MARKER),
         },
       ],
+    })
+  })
+
+  it('posts a REQUEST_CHANGES review keeping inline comments', async () => {
+    const createReview = vi.fn()
+    const octokit = {
+      rest: { pulls: { createReview } },
+    } as unknown as Octokit
+    await postReview(octokit, { owner: 'o', repo: 'r' }, 5, 'body', 'REQUEST_CHANGES', [finding('critical')])
+    expect(createReview).toHaveBeenCalledWith({
+      owner: 'o',
+      repo: 'r',
+      pull_number: 5,
+      event: 'REQUEST_CHANGES',
+      body: 'body',
+      comments: [
+        {
+          path: 'src/app.ts',
+          line: 2,
+          side: 'RIGHT',
+          body: expect.stringContaining(COMMENT_MARKER),
+        },
+      ],
+    })
+  })
+
+  it('posts an APPROVE review sending empty comments array', async () => {
+    const createReview = vi.fn()
+    const octokit = {
+      rest: { pulls: { createReview } },
+    } as unknown as Octokit
+    await postReview(octokit, { owner: 'o', repo: 'r' }, 5, 'body', 'APPROVE', [finding('critical')])
+    expect(createReview).toHaveBeenCalledWith({
+      owner: 'o',
+      repo: 'r',
+      pull_number: 5,
+      event: 'APPROVE',
+      body: 'body',
+      comments: [],
     })
   })
 })

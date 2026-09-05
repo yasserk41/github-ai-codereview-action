@@ -73,18 +73,26 @@ describe('readRawInputs', () => {
     expect(raw.configPath).toBe('.ai-review.yml')
     expect(raw.contextWindow).toBe('')
     expect(raw.githubToken).toBe('')
+    expect(raw.verdict).toBe('comment')
+    expect(raw.requestChangesOn).toBe('critical')
   })
 
   it('reads provided inputs', () => {
     const raw = readRawInputs(
       (name) =>
-        ({ provider: 'kimi', model: 'kimi-k2', 'github-token': 't' } as Record<string, string>)[
-          name
-        ] ?? '',
+        ({
+          provider: 'kimi',
+          model: 'kimi-k2',
+          'github-token': 't',
+          verdict: 'auto',
+          'request-changes-on': 'warning',
+        } as Record<string, string>)[name] ?? '',
     )
     expect(raw.provider).toBe('kimi')
     expect(raw.model).toBe('kimi-k2')
     expect(raw.githubToken).toBe('t')
+    expect(raw.verdict).toBe('auto')
+    expect(raw.requestChangesOn).toBe('warning')
   })
 })
 
@@ -96,6 +104,8 @@ describe('resolveConfig', () => {
     const config = resolveConfig(raw, repo, { defaultModel: 'glm-4.6', contextWindowTokens: 200000 })
     expect(config.model).toBe('glm-4.6')
     expect(config.contextWindowTokens).toBe(200000)
+    expect(config.verdict).toBe('comment')
+    expect(config.requestChangesOn).toBe('critical')
   })
 
   it('input model overrides preset default', () => {
@@ -120,5 +130,25 @@ describe('resolveConfig', () => {
     const config = resolveConfig(raw, { ...repo, maxComments: 3 }, { defaultModel: 'm', contextWindowTokens: 1000 })
     expect(config.maxComments).toBe(3)
     expect(config.provider).toBe('openai')
+  })
+
+  it('passes through explicit verdict and requestChangesOn', () => {
+    const config = resolveConfig(
+      { ...raw, verdict: 'auto', requestChangesOn: 'warning' },
+      repo,
+      { defaultModel: 'm', contextWindowTokens: 1000 },
+    )
+    expect(config.verdict).toBe('auto')
+    expect(config.requestChangesOn).toBe('warning')
+  })
+
+  it('falls back to defaults on invalid verdict and requestChangesOn', () => {
+    const config = resolveConfig(
+      { ...raw, verdict: 'invalid', requestChangesOn: 'invalid' },
+      repo,
+      { defaultModel: 'm', contextWindowTokens: 1000 },
+    )
+    expect(config.verdict).toBe('comment')
+    expect(config.requestChangesOn).toBe('critical')
   })
 })

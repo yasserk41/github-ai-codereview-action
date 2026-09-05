@@ -52822,6 +52822,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.filterFindings = filterFindings;
 exports.buildSummaryBody = buildSummaryBody;
 exports.cleanupPreviousComments = cleanupPreviousComments;
+exports.resolveVerdict = resolveVerdict;
 exports.postReview = postReview;
 const types_1 = __nccwpck_require__(42695);
 function filterFindings(findings, diff, config) {
@@ -52883,20 +52884,36 @@ async function cleanupPreviousComments(octokit, repo, prNumber) {
     }
     return deleted;
 }
-async function postReview(octokit, repo, prNumber, body, inline) {
+function resolveVerdict(filtered, config) {
+    if (config.verdict !== 'auto') {
+        return 'COMMENT';
+    }
+    const all = [...filtered.inline, ...filtered.summaryOnly];
+    if (all.length === 0) {
+        return 'APPROVE';
+    }
+    const thresholdRank = types_1.SEVERITY_RANK[config.requestChangesOn];
+    if (all.some((f) => types_1.SEVERITY_RANK[f.severity] >= thresholdRank)) {
+        return 'REQUEST_CHANGES';
+    }
+    return 'COMMENT';
+}
+async function postReview(octokit, repo, prNumber, body, event, inline) {
     const client = octokit;
     await client.rest.pulls.createReview({
         owner: repo.owner,
         repo: repo.repo,
         pull_number: prNumber,
-        event: 'COMMENT',
+        event,
         body,
-        comments: inline.map((f) => ({
-            path: f.file,
-            line: f.line,
-            side: 'RIGHT',
-            body: `${types_1.COMMENT_MARKER}\n**[${f.severity.toUpperCase()}] ${f.title}**\n\n${f.body}`,
-        })),
+        comments: event === 'APPROVE'
+            ? []
+            : inline.map((f) => ({
+                path: f.file,
+                line: f.line,
+                side: 'RIGHT',
+                body: `${types_1.COMMENT_MARKER}\n**[${f.severity.toUpperCase()}] ${f.title}**\n\n${f.body}`,
+            })),
     });
 }
 
@@ -53009,9 +53026,15 @@ function readRawInputs(getInput = core.getInput) {
         contextWindow: getInput('context-window') || '',
         githubToken: getInput('github-token'),
         configPath: getInput('config-path') || '.ai-review.yml',
+        verdict: getInput('verdict') || 'comment',
+        requestChangesOn: getInput('request-changes-on') || 'critical',
     };
 }
 function resolveConfig(raw, repo, preset) {
+    const verdict = raw.verdict === 'auto' ? 'auto' : 'comment';
+    const requestChangesOn = types_1.SEVERITIES.includes(raw.requestChangesOn)
+        ? raw.requestChangesOn
+        : 'critical';
     return {
         provider: raw.provider,
         model: raw.model || preset.defaultModel,
@@ -53022,6 +53045,8 @@ function resolveConfig(raw, repo, preset) {
         reviewStyle: repo.reviewStyle,
         severityThreshold: repo.severityThreshold,
         customInstructions: repo.customInstructions,
+        verdict,
+        requestChangesOn,
     };
 }
 
@@ -53216,6 +53241,7 @@ async function run() {
     });
     core.setOutput('findings-count', String(result.findingsCount));
     core.setOutput('inline-comments', String(result.inlineCount));
+    core.setOutput('verdict', result.verdict);
 }
 run().catch((err) => {
     core.setFailed(describeError(err));
@@ -53588,6 +53614,8 @@ async function runReview(deps) {
     let inline = [];
     let summaryOnly = [];
     let body;
+    let event = 'COMMENT';
+    let verdict = 'commented';
     if (diff.files.length === 0) {
         body = [
             types_1.COMMENT_MARKER,
@@ -53605,13 +53633,24 @@ async function runReview(deps) {
         inline = filtered.inline;
         summaryOnly = filtered.summaryOnly;
         body = (0, comment_1.buildSummaryBody)(filtered, diff, config);
+        event = (0, comment_1.resolveVerdict)(filtered, config);
+        if (event === 'APPROVE') {
+            verdict = 'approved';
+        }
+        else if (event === 'REQUEST_CHANGES') {
+            verdict = 'changes-requested';
+        }
+        else {
+            verdict = 'commented';
+        }
     }
     await (0, comment_1.cleanupPreviousComments)(deps.octokit, deps.repo, deps.prNumber);
-    await (0, comment_1.postReview)(deps.octokit, deps.repo, deps.prNumber, body, inline);
+    await (0, comment_1.postReview)(deps.octokit, deps.repo, deps.prNumber, body, event, inline);
     return {
         findingsCount: inline.length + summaryOnly.length,
         inlineCount: inline.length,
         summaryOnlyCount: summaryOnly.length,
+        verdict,
     };
 }
 

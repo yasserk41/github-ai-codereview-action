@@ -109,6 +109,8 @@ export interface ReviewConfig {
   reviewStyle: 'high-signal' | 'thorough'
   severityThreshold: Severity
   customInstructions?: string
+  verdict: 'comment' | 'auto'
+  requestChangesOn: Severity
 }
 
 export interface ReviewProvider {
