@@ -2,7 +2,6 @@ import { describe, it, expect, vi } from 'vitest'
 import type { Octokit } from '@octokit/core' with { 'resolution-mode': 'import' }
 import {
   buildSummaryBody,
-  cleanupPreviousComments,
   filterFindings,
   postReview,
   resolveVerdict,
@@ -98,28 +97,6 @@ describe('buildSummaryBody', () => {
   })
 })
 
-describe('cleanupPreviousComments', () => {
-  it('deletes only review comments containing the marker', async () => {
-    const deleteReviewComment = vi.fn()
-    const paginate = vi
-      .fn()
-      .mockResolvedValue([
-        { id: 1, body: `${COMMENT_MARKER}\nold` },
-        { id: 2, body: 'human comment' },
-      ])
-    const octokit = {
-      paginate,
-      rest: { pulls: { deleteReviewComment } },
-    } as unknown as Octokit
-    const deleted = await cleanupPreviousComments(octokit, { owner: 'o', repo: 'r' }, 5)
-    expect(deleted).toBe(1)
-    expect(deleteReviewComment).toHaveBeenCalledWith({
-      owner: 'o',
-      repo: 'r',
-      comment_id: 1,
-    })
-  })
-})
 
 describe('resolveVerdict', () => {
   it('returns COMMENT when verdict mode is not auto', () => {

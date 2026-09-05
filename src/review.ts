@@ -6,11 +6,18 @@ import {
 } from './diff'
 import {
   buildSummaryBody,
-  cleanupPreviousComments,
   filterFindings,
   postReview,
   resolveVerdict,
 } from './comment'
+import {
+  getBotThreads,
+  planReconciliation,
+  replyToComment,
+  resolveThread,
+  RESOLVE_REPLY_BODY,
+  type BotThread,
+} from './threads'
 import { buildSystemPrompt, buildUserPrompt } from './prompt'
 import { createProvider, getPreset } from './providers/registry'
 import { COMMENT_MARKER, type ReviewProvider } from './providers/types'
@@ -30,6 +37,7 @@ export interface ReviewResult {
   inlineCount: number
   summaryOnlyCount: number
   verdict: 'approved' | 'changes-requested' | 'commented'
+  resolvedThreads: number
 }
 
 export async function runReview(deps: ReviewDeps): Promise<ReviewResult> {
@@ -72,7 +80,23 @@ export async function runReview(deps: ReviewDeps): Promise<ReviewResult> {
     }
   }
 
-  await cleanupPreviousComments(deps.octokit, deps.repo, deps.prNumber)
+  const threads = await getBotThreads(deps.octokit, deps.repo, deps.prNumber)
+  let toResolve: BotThread[] = []
+
+  if (diff.files.length === 0) {
+    toResolve = threads
+  } else {
+    const planned = planReconciliation(threads, inline)
+    toResolve = planned.toResolve
+    const suppressSet = new Set(planned.suppress)
+    inline = inline.filter((f) => !suppressSet.has(`${f.file}:${f.line}`))
+  }
+
+  for (const thread of toResolve) {
+    await replyToComment(deps.octokit, deps.repo, thread.firstCommentId, RESOLVE_REPLY_BODY)
+    await resolveThread(deps.octokit, thread.threadId)
+  }
+
   await postReview(deps.octokit, deps.repo, deps.prNumber, body, event, inline)
 
   return {
@@ -80,5 +104,6 @@ export async function runReview(deps: ReviewDeps): Promise<ReviewResult> {
     inlineCount: inline.length,
     summaryOnlyCount: summaryOnly.length,
     verdict,
+    resolvedThreads: toResolve.length,
   }
 }

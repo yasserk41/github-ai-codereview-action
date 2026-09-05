@@ -12,24 +12,9 @@ export interface FilteredFindings {
   summaryOnly: Finding[]
 }
 
-interface ReviewComment {
-  id: number
-  body?: string
-}
-
 interface OctokitClient {
-  paginate: (
-    endpoint: unknown,
-    parameters: { owner: string; repo: string; pull_number: number; per_page: number },
-  ) => Promise<ReviewComment[]>
   rest: {
     pulls: {
-      listReviewComments?: unknown
-      deleteReviewComment: (params: {
-        owner: string
-        repo: string
-        comment_id: number
-      }) => Promise<unknown>
       createReview: (params: {
         owner: string
         repo: string
@@ -107,31 +92,6 @@ export function buildSummaryBody(
   return lines.join('\n')
 }
 
-export async function cleanupPreviousComments(
-  octokit: Octokit,
-  repo: { owner: string; repo: string },
-  prNumber: number,
-): Promise<number> {
-  const client = octokit as unknown as OctokitClient
-  const comments = await client.paginate(client.rest.pulls.listReviewComments, {
-    owner: repo.owner,
-    repo: repo.repo,
-    pull_number: prNumber,
-    per_page: 100,
-  })
-  let deleted = 0
-  for (const comment of comments) {
-    if (comment.body?.includes(COMMENT_MARKER)) {
-      await client.rest.pulls.deleteReviewComment({
-        owner: repo.owner,
-        repo: repo.repo,
-        comment_id: comment.id,
-      })
-      deleted++
-    }
-  }
-  return deleted
-}
 
 export function resolveVerdict(
   filtered: FilteredFindings,

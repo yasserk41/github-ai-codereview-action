@@ -44,6 +44,8 @@ outputs:
     description: 'Number of inline comments posted'
   verdict:
     description: 'Submitted review verdict: approved | changes-requested | commented'
+  resolved-threads:
+    description: 'Previous comment threads auto-resolved because their findings vanished'
 runs:
   using: 'node20'
   main: 'dist/index.js'

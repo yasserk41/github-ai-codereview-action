@@ -52821,7 +52821,6 @@ function wrappy (fn, cb) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.filterFindings = filterFindings;
 exports.buildSummaryBody = buildSummaryBody;
-exports.cleanupPreviousComments = cleanupPreviousComments;
 exports.resolveVerdict = resolveVerdict;
 exports.postReview = postReview;
 const types_1 = __nccwpck_require__(42695);
@@ -52862,27 +52861,6 @@ function buildSummaryBody(filtered, diff, config) {
         lines.push('> Diff was truncated to fit the model context window.');
     }
     return lines.join('\n');
-}
-async function cleanupPreviousComments(octokit, repo, prNumber) {
-    const client = octokit;
-    const comments = await client.paginate(client.rest.pulls.listReviewComments, {
-        owner: repo.owner,
-        repo: repo.repo,
-        pull_number: prNumber,
-        per_page: 100,
-    });
-    let deleted = 0;
-    for (const comment of comments) {
-        if (comment.body?.includes(types_1.COMMENT_MARKER)) {
-            await client.rest.pulls.deleteReviewComment({
-                owner: repo.owner,
-                repo: repo.repo,
-                comment_id: comment.id,
-            });
-            deleted++;
-        }
-    }
-    return deleted;
 }
 function resolveVerdict(filtered, config) {
     if (config.verdict !== 'auto') {
@@ -53242,6 +53220,7 @@ async function run() {
     core.setOutput('findings-count', String(result.findingsCount));
     core.setOutput('inline-comments', String(result.inlineCount));
     core.setOutput('verdict', result.verdict);
+    core.setOutput('resolved-threads', String(result.resolvedThreads));
 }
 run().catch((err) => {
     core.setFailed(describeError(err));
@@ -53602,6 +53581,7 @@ exports.runReview = runReview;
 const config_1 = __nccwpck_require__(22973);
 const diff_1 = __nccwpck_require__(19952);
 const comment_1 = __nccwpck_require__(62246);
+const threads_1 = __nccwpck_require__(26374);
 const prompt_1 = __nccwpck_require__(10705);
 const registry_1 = __nccwpck_require__(63307);
 const types_1 = __nccwpck_require__(42695);
@@ -53644,13 +53624,141 @@ async function runReview(deps) {
             verdict = 'commented';
         }
     }
-    await (0, comment_1.cleanupPreviousComments)(deps.octokit, deps.repo, deps.prNumber);
+    const threads = await (0, threads_1.getBotThreads)(deps.octokit, deps.repo, deps.prNumber);
+    let toResolve = [];
+    if (diff.files.length === 0) {
+        toResolve = threads;
+    }
+    else {
+        const planned = (0, threads_1.planReconciliation)(threads, inline);
+        toResolve = planned.toResolve;
+        const suppressSet = new Set(planned.suppress);
+        inline = inline.filter((f) => !suppressSet.has(`${f.file}:${f.line}`));
+    }
+    for (const thread of toResolve) {
+        await (0, threads_1.replyToComment)(deps.octokit, deps.repo, thread.firstCommentId, threads_1.RESOLVE_REPLY_BODY);
+        await (0, threads_1.resolveThread)(deps.octokit, thread.threadId);
+    }
     await (0, comment_1.postReview)(deps.octokit, deps.repo, deps.prNumber, body, event, inline);
     return {
         findingsCount: inline.length + summaryOnly.length,
         inlineCount: inline.length,
         summaryOnlyCount: summaryOnly.length,
         verdict,
+        resolvedThreads: toResolve.length,
+    };
+}
+
+
+/***/ }),
+
+/***/ 26374:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.RESOLVE_REPLY_BODY = void 0;
+exports.getBotThreads = getBotThreads;
+exports.resolveThread = resolveThread;
+exports.replyToComment = replyToComment;
+exports.planReconciliation = planReconciliation;
+const types_1 = __nccwpck_require__(42695);
+exports.RESOLVE_REPLY_BODY = `${types_1.COMMENT_MARKER}\nFix verified — this issue was not flagged in the latest review. Auto-resolving.`;
+async function getBotThreads(octokit, repo, prNumber) {
+    const client = octokit;
+    const query = `
+    query($owner: String!, $repo: String!, $prNumber: Int!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $prNumber) {
+          reviewThreads(first: 100) {
+            nodes {
+              id
+              isResolved
+              comments(first: 50) {
+                nodes {
+                  databaseId
+                  body
+                  path
+                  line
+                  originalLine
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+    const data = (await client.graphql(query, {
+        owner: repo.owner,
+        repo: repo.repo,
+        prNumber,
+    }));
+    const nodes = data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+    const threads = [];
+    for (const node of nodes) {
+        if (node.isResolved) {
+            continue;
+        }
+        const comments = node.comments?.nodes ?? [];
+        if (comments.length === 0) {
+            continue;
+        }
+        const hasMarker = comments.some((c) => c.body?.includes(types_1.COMMENT_MARKER));
+        if (!hasMarker) {
+            continue;
+        }
+        const firstComment = comments[0];
+        const line = firstComment.line ?? firstComment.originalLine ?? 0;
+        threads.push({
+            threadId: node.id,
+            isResolved: node.isResolved,
+            path: firstComment.path,
+            line,
+            firstCommentId: firstComment.databaseId,
+        });
+    }
+    return threads;
+}
+async function resolveThread(octokit, threadId) {
+    const client = octokit;
+    const mutation = `
+    mutation resolveReviewThread($threadId: ID!) {
+      resolveReviewThread(input: { threadId: $threadId }) {
+        thread {
+          id
+          isResolved
+        }
+      }
+    }
+  `;
+    await client.graphql(mutation, { threadId });
+}
+async function replyToComment(octokit, repo, commentId, body) {
+    const client = octokit;
+    await client.rest.pulls.createReplyForReviewComment({
+        owner: repo.owner,
+        repo: repo.repo,
+        comment_id: commentId,
+        body,
+    });
+}
+function planReconciliation(threads, newInline) {
+    const toResolve = [];
+    const suppressSet = new Set();
+    for (const thread of threads) {
+        const matched = newInline.some((f) => f.file === thread.path && f.line === thread.line);
+        if (matched) {
+            suppressSet.add(`${thread.path}:${thread.line}`);
+        }
+        else {
+            toResolve.push(thread);
+        }
+    }
+    return {
+        toResolve,
+        suppress: Array.from(suppressSet),
     };
 }
 

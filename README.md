@@ -76,6 +76,7 @@ The following inputs are defined in `action.yml`:
 | `findings-count` | Total findings reported |
 | `inline-comments` | Number of inline comments posted |
 | `verdict` | Submitted review verdict: `approved` \| `changes-requested` \| `commented` |
+| `resolved-threads` | Previous comment threads auto-resolved because their findings vanished |
 
 ---
 
@@ -112,7 +113,7 @@ custom-instructions: |         # appended to the system prompt
 
 - **One review per push:** Findings and verdict summaries are submitted as a single pull request review, keeping PR timelines organized and avoiding noise.
 - **Verdicts:** When `verdict` is set to `auto`, the action submits `APPROVE` if no issues are found, `REQUEST_CHANGES` if findings meet or exceed the `request-changes-on` threshold, or `COMMENT` otherwise. Due to GitHub limitations, approvals submitted with `GITHUB_TOKEN` do not satisfy branch-protection required-approval counts, though `REQUEST_CHANGES` does block merges.
-- **Stale comment cleanup:** When a new commit is pushed to an open pull request (`synchronize`), the action deletes any previous inline comments it left on earlier pushes before posting the new review.
+- **Thread reconciliation:** on every run, previous bot comment threads are reconciled - threads whose findings were no longer flagged in the latest review get an auto-reply and are resolved; threads whose findings persist are kept (no duplicate comments). Note: if fixed code shifts line numbers, the old thread is resolved and a new comment anchors to the updated line.
 - **Diff truncation for large PRs:** For large changes exceeding ~70% of the model's context window, non-essential files are skipped first and remaining diffs are truncated. A clear truncation warning is included in the summary body so reviews remain transparent.
 - **Empty-findings LGTM:** When no issues meet or exceed the severity threshold, the action submits a friendly "LGTM — no issues found" summary review without posting empty comments.
 - **Unanchored findings:** If the LLM generates a finding for a line not modified in the pull request diff, the action safely downgrades it into the summary review table with a direct file and line reference, avoiding GitHub API validation errors.

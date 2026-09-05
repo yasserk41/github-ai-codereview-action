@@ -21,32 +21,46 @@ function fakeProvider(findings: Finding[]): ReviewProvider {
   }
 }
 
-function fakeOctokit() {
+function fakeOctokit(threadNodes: unknown[] = []) {
   const createReview = vi.fn()
-  const deleteReviewComment = vi.fn()
+  const createReplyForReviewComment = vi.fn().mockResolvedValue({})
+  const graphql = vi.fn().mockImplementation((query: string) => {
+    if (query.includes('resolveReviewThread')) {
+      return Promise.resolve({ resolveReviewThread: { thread: { id: 'resolved' } } })
+    }
+    return Promise.resolve({
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            nodes: threadNodes,
+          },
+        },
+      },
+    })
+  })
   const octokit = {
     paginate: vi.fn().mockImplementation((fn: unknown) => {
       const name = (fn as { endpoint: { route: string } } | undefined)?.endpoint?.route ?? ''
       if (name.includes('files') || name.includes('listFiles')) {
         return [{ filename: 'src/app.ts', patch: SAMPLE_PATCH, additions: 2, deletions: 1 }]
       }
-      if (name.includes('comments') || name.includes('listReviewComments')) {
-        return [{ id: 11, body: '<!-- ai-code-review-action -->\nold' }]
-      }
       return []
     }),
+    graphql,
     rest: {
       pulls: {
         createReview,
-        deleteReviewComment,
+        createReplyForReviewComment,
         listFiles: { endpoint: { route: 'GET /repos/{owner}/{repo}/pulls/{pull_number}/files' } },
-        listReviewComments: {
-          endpoint: { route: 'GET /repos/{owner}/{repo}/pulls/{pull_number}/comments' },
-        },
       },
     },
   }
-  return { octokit: octokit as unknown as Octokit, createReview, deleteReviewComment }
+  return {
+    octokit: octokit as unknown as Octokit,
+    createReview,
+    createReplyForReviewComment,
+    graphql,
+  }
 }
 
 const raw: RawInputs = {
@@ -81,15 +95,35 @@ function deps(provider: ReviewProvider, octokit: Octokit, rawOverrides: Partial<
 }
 
 describe('runReview', () => {
-  it('posts a review with inline comments for anchored findings and cleans stale ones', async () => {
-    const { octokit, createReview, deleteReviewComment } = fakeOctokit()
+  it('posts a review with inline comments for anchored findings and resolves vanished threads', async () => {
+    const vanishedThread = {
+      id: 't-vanished',
+      isResolved: false,
+      comments: {
+        nodes: [
+          {
+            databaseId: 11,
+            body: '<!-- ai-code-review-action -->\nold issue',
+            path: 'src/app.ts',
+            line: 99,
+            originalLine: 99,
+          },
+        ],
+      },
+    }
+    const { octokit, createReview, createReplyForReviewComment, graphql } = fakeOctokit([vanishedThread])
     const result = await runReview(deps(fakeProvider([finding]), octokit))
-    expect(result).toEqual({ findingsCount: 1, inlineCount: 1, summaryOnlyCount: 0, verdict: 'commented' })
-    expect(deleteReviewComment).toHaveBeenCalledWith({
+    expect(result).toEqual({ findingsCount: 1, inlineCount: 1, summaryOnlyCount: 0, verdict: 'commented', resolvedThreads: 1 })
+    expect(createReplyForReviewComment).toHaveBeenCalledWith({
       owner: 'o',
       repo: 'r',
       comment_id: 11,
+      body: expect.stringContaining('Fix verified'),
     })
+    expect(graphql).toHaveBeenCalledWith(
+      expect.stringContaining('resolveReviewThread'),
+      { threadId: 't-vanished' },
+    )
     expect(createReview).toHaveBeenCalledTimes(1)
     const review = createReview.mock.calls[0][0]
     expect(review.event).toBe('COMMENT')
@@ -98,10 +132,34 @@ describe('runReview', () => {
     expect(review.body).toContain('1 critical')
   })
 
+  it('does not duplicate inline comment when finding persists on the same line', async () => {
+    const persistedThread = {
+      id: 't-persisted',
+      isResolved: false,
+      comments: {
+        nodes: [
+          {
+            databaseId: 12,
+            body: '<!-- ai-code-review-action -->\nexisting issue',
+            path: 'src/app.ts',
+            line: 3,
+            originalLine: 3,
+          },
+        ],
+      },
+    }
+    const { octokit, createReview, createReplyForReviewComment } = fakeOctokit([persistedThread])
+    const result = await runReview(deps(fakeProvider([finding]), octokit))
+    expect(result.resolvedThreads).toBe(0)
+    expect(createReplyForReviewComment).not.toHaveBeenCalled()
+    expect(createReview).toHaveBeenCalledTimes(1)
+    expect(createReview.mock.calls[0][0].comments).toEqual([])
+  })
+
   it('posts an LGTM summary when the provider returns no findings', async () => {
     const { octokit, createReview } = fakeOctokit()
     const result = await runReview(deps(fakeProvider([]), octokit))
-    expect(result).toEqual({ findingsCount: 0, inlineCount: 0, summaryOnlyCount: 0, verdict: 'commented' })
+    expect(result).toEqual({ findingsCount: 0, inlineCount: 0, summaryOnlyCount: 0, verdict: 'commented', resolvedThreads: 0 })
     expect(createReview.mock.calls[0][0].body.toLowerCase()).toContain('lgtm')
   })
 
@@ -109,20 +167,25 @@ describe('runReview', () => {
     const { octokit, createReview } = fakeOctokit()
     const stray = { ...finding, file: 'nope.ts', line: 42 }
     const result = await runReview(deps(fakeProvider([stray]), octokit))
-    expect(result).toEqual({ findingsCount: 1, inlineCount: 0, summaryOnlyCount: 1, verdict: 'commented' })
+    expect(result).toEqual({ findingsCount: 1, inlineCount: 0, summaryOnlyCount: 1, verdict: 'commented', resolvedThreads: 0 })
     expect(createReview.mock.calls[0][0].comments).toEqual([])
     expect(createReview.mock.calls[0][0].body).toContain('nope.ts#L42')
   })
 
   it('posts a note when no reviewable files remain after filtering', async () => {
     const createReview = vi.fn()
+    const graphql = vi.fn().mockResolvedValue({
+      repository: { pullRequest: { reviewThreads: { nodes: [] } } },
+    })
     const octokit = {
       paginate: vi.fn().mockResolvedValue([{ filename: 'logo.png', additions: 1, deletions: 0 }]),
-      rest: { pulls: { createReview } },
+      graphql,
+      rest: { pulls: { createReview, createReplyForReviewComment: vi.fn() } },
     } as unknown as Octokit
     const result = await runReview(deps(fakeProvider([]), octokit))
     expect(result.findingsCount).toBe(0)
     expect(result.verdict).toBe('commented')
+    expect(result.resolvedThreads).toBe(0)
     expect(createReview).toHaveBeenCalledTimes(1)
     expect(createReview.mock.calls[0][0].body).toContain('No reviewable files')
   })
@@ -130,7 +193,7 @@ describe('runReview', () => {
   it('submits REQUEST_CHANGES and returns verdict changes-requested for critical findings in auto mode', async () => {
     const { octokit, createReview } = fakeOctokit()
     const result = await runReview(deps(fakeProvider([finding]), octokit, { verdict: 'auto' }))
-    expect(result).toEqual({ findingsCount: 1, inlineCount: 1, summaryOnlyCount: 0, verdict: 'changes-requested' })
+    expect(result).toEqual({ findingsCount: 1, inlineCount: 1, summaryOnlyCount: 0, verdict: 'changes-requested', resolvedThreads: 0 })
     expect(createReview).toHaveBeenCalledTimes(1)
     const review = createReview.mock.calls[0][0]
     expect(review.event).toBe('REQUEST_CHANGES')
@@ -140,7 +203,7 @@ describe('runReview', () => {
   it('submits APPROVE and returns verdict approved for zero findings in auto mode', async () => {
     const { octokit, createReview } = fakeOctokit()
     const result = await runReview(deps(fakeProvider([]), octokit, { verdict: 'auto' }))
-    expect(result).toEqual({ findingsCount: 0, inlineCount: 0, summaryOnlyCount: 0, verdict: 'approved' })
+    expect(result).toEqual({ findingsCount: 0, inlineCount: 0, summaryOnlyCount: 0, verdict: 'approved', resolvedThreads: 0 })
     expect(createReview).toHaveBeenCalledTimes(1)
     const review = createReview.mock.calls[0][0]
     expect(review.event).toBe('APPROVE')
