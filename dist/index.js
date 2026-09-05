@@ -53572,12 +53572,46 @@ exports.COMMENT_MARKER = '<!-- ai-code-review-action -->';
 /***/ }),
 
 /***/ 17491:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
 
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.runReview = runReview;
+const core = __importStar(__nccwpck_require__(37484));
 const config_1 = __nccwpck_require__(22973);
 const diff_1 = __nccwpck_require__(19952);
 const comment_1 = __nccwpck_require__(62246);
@@ -53635,9 +53669,16 @@ async function runReview(deps) {
         const suppressSet = new Set(planned.suppress);
         inline = inline.filter((f) => !suppressSet.has(`${f.file}:${f.line}`));
     }
+    let actuallyResolved = 0;
     for (const thread of toResolve) {
-        await (0, threads_1.replyToComment)(deps.octokit, deps.repo, deps.prNumber, thread.firstCommentId, threads_1.RESOLVE_REPLY_BODY);
-        await (0, threads_1.resolveThread)(deps.octokit, thread.threadId);
+        try {
+            await (0, threads_1.replyToComment)(deps.octokit, deps.repo, deps.prNumber, thread.firstCommentId, threads_1.RESOLVE_REPLY_BODY);
+            await (0, threads_1.resolveThread)(deps.octokit, thread.threadId);
+            actuallyResolved++;
+        }
+        catch (err) {
+            core.warning(`Failed to auto-resolve review thread (${thread.path}:${thread.line}): ${err instanceof Error ? err.message : String(err)}`);
+        }
     }
     await (0, comment_1.postReview)(deps.octokit, deps.repo, deps.prNumber, body, event, inline);
     return {
@@ -53645,7 +53686,7 @@ async function runReview(deps) {
         inlineCount: inline.length,
         summaryOnlyCount: summaryOnly.length,
         verdict,
-        resolvedThreads: toResolve.length,
+        resolvedThreads: actuallyResolved,
     };
 }
 

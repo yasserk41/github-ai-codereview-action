@@ -133,6 +133,41 @@ describe('runReview', () => {
     expect(review.body).toContain('1 critical')
   })
 
+  it('continues posting the review when thread resolution is rejected by permissions', async () => {
+    const vanishedThread = {
+      id: 't-forbidden',
+      isResolved: false,
+      comments: {
+        nodes: [
+          {
+            databaseId: 13,
+            body: '<!-- ai-code-review-action -->\nold issue',
+            path: 'src/app.ts',
+            line: 99,
+            originalLine: 99,
+          },
+        ],
+      },
+    }
+    const { octokit, createReview, graphql } = fakeOctokit([vanishedThread])
+    graphql.mockImplementation((query: string) => {
+      if (query.includes('resolveReviewThread')) {
+        return Promise.reject(new Error('Resource not accessible by integration'))
+      }
+      return Promise.resolve({
+        repository: {
+          pullRequest: {
+            reviewThreads: { nodes: [vanishedThread] },
+          },
+        },
+      })
+    })
+    const result = await runReview(deps(fakeProvider([finding]), octokit))
+    expect(result).toEqual({ findingsCount: 1, inlineCount: 1, summaryOnlyCount: 0, verdict: 'commented', resolvedThreads: 0 })
+    expect(createReview).toHaveBeenCalledTimes(1)
+    expect(createReview.mock.calls[0][0].comments[0].path).toBe('src/app.ts')
+  })
+
   it('does not duplicate inline comment when finding persists on the same line', async () => {
     const persistedThread = {
       id: 't-persisted',

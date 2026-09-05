@@ -1,3 +1,4 @@
+import * as core from '@actions/core'
 import type { Octokit } from '@octokit/core' with { 'resolution-mode': 'import' }
 import { resolveConfig, type RawInputs, type RepoConfig } from './config'
 import {
@@ -92,9 +93,15 @@ export async function runReview(deps: ReviewDeps): Promise<ReviewResult> {
     inline = inline.filter((f) => !suppressSet.has(`${f.file}:${f.line}`))
   }
 
+  let actuallyResolved = 0
   for (const thread of toResolve) {
-    await replyToComment(deps.octokit, deps.repo, deps.prNumber, thread.firstCommentId, RESOLVE_REPLY_BODY)
-    await resolveThread(deps.octokit, thread.threadId)
+    try {
+      await replyToComment(deps.octokit, deps.repo, deps.prNumber, thread.firstCommentId, RESOLVE_REPLY_BODY)
+      await resolveThread(deps.octokit, thread.threadId)
+      actuallyResolved++
+    } catch (err) {
+      core.warning(`Failed to auto-resolve review thread (${thread.path}:${thread.line}): ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   await postReview(deps.octokit, deps.repo, deps.prNumber, body, event, inline)
@@ -104,6 +111,6 @@ export async function runReview(deps: ReviewDeps): Promise<ReviewResult> {
     inlineCount: inline.length,
     summaryOnlyCount: summaryOnly.length,
     verdict,
-    resolvedThreads: toResolve.length,
+    resolvedThreads: actuallyResolved,
   }
 }

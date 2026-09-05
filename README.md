@@ -22,7 +22,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 jobs:
   review:
@@ -35,6 +35,8 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
+
+> Note: `contents: write` is required for the thread auto-resolve feature (GitHub's `resolveReviewThread` API demands it). With only `contents: read`, reviews still post normally but resolved findings leave their threads open, with a warning in the run log.
 
 ---
 
@@ -130,7 +132,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 jobs:
   review:
@@ -152,7 +154,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 jobs:
   review:
@@ -176,7 +178,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 jobs:
   review:
