@@ -93,7 +93,7 @@ export async function runReview(deps: ReviewDeps): Promise<ReviewResult> {
   }
 
   for (const thread of toResolve) {
-    await replyToComment(deps.octokit, deps.repo, thread.firstCommentId, RESOLVE_REPLY_BODY)
+    await replyToComment(deps.octokit, deps.repo, deps.prNumber, thread.firstCommentId, RESOLVE_REPLY_BODY)
     await resolveThread(deps.octokit, thread.threadId)
   }
 

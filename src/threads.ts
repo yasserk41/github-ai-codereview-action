@@ -44,6 +44,7 @@ interface OctokitThreadsClient {
       createReplyForReviewComment: (params: {
         owner: string
         repo: string
+        pull_number: number
         comment_id: number
         body: string
       }) => Promise<unknown>
@@ -136,6 +137,7 @@ export async function resolveThread(
 export async function replyToComment(
   octokit: Octokit,
   repo: { owner: string; repo: string },
+  prNumber: number,
   commentId: number,
   body: string,
 ): Promise<void> {
@@ -143,6 +145,7 @@ export async function replyToComment(
   await client.rest.pulls.createReplyForReviewComment({
     owner: repo.owner,
     repo: repo.repo,
+    pull_number: prNumber,
     comment_id: commentId,
     body,
   })

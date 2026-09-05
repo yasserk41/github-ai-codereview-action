@@ -117,6 +117,7 @@ describe('runReview', () => {
     expect(createReplyForReviewComment).toHaveBeenCalledWith({
       owner: 'o',
       repo: 'r',
+      pull_number: 5,
       comment_id: 11,
       body: expect.stringContaining('Fix verified'),
     })

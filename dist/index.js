@@ -53636,7 +53636,7 @@ async function runReview(deps) {
         inline = inline.filter((f) => !suppressSet.has(`${f.file}:${f.line}`));
     }
     for (const thread of toResolve) {
-        await (0, threads_1.replyToComment)(deps.octokit, deps.repo, thread.firstCommentId, threads_1.RESOLVE_REPLY_BODY);
+        await (0, threads_1.replyToComment)(deps.octokit, deps.repo, deps.prNumber, thread.firstCommentId, threads_1.RESOLVE_REPLY_BODY);
         await (0, threads_1.resolveThread)(deps.octokit, thread.threadId);
     }
     await (0, comment_1.postReview)(deps.octokit, deps.repo, deps.prNumber, body, event, inline);
@@ -53735,11 +53735,12 @@ async function resolveThread(octokit, threadId) {
   `;
     await client.graphql(mutation, { threadId });
 }
-async function replyToComment(octokit, repo, commentId, body) {
+async function replyToComment(octokit, repo, prNumber, commentId, body) {
     const client = octokit;
     await client.rest.pulls.createReplyForReviewComment({
         owner: repo.owner,
         repo: repo.repo,
+        pull_number: prNumber,
         comment_id: commentId,
         body,
     });

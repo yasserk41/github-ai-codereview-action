@@ -201,6 +201,7 @@ describe('replyToComment', () => {
     await replyToComment(
       octokit,
       { owner: 'test-owner', repo: 'test-repo' },
+      7,
       12345,
       RESOLVE_REPLY_BODY,
     )
@@ -208,6 +209,7 @@ describe('replyToComment', () => {
     expect(createReplyForReviewComment).toHaveBeenCalledWith({
       owner: 'test-owner',
       repo: 'test-repo',
+      pull_number: 7,
       comment_id: 12345,
       body: '<!-- ai-code-review-action -->\nFix verified — this issue was not flagged in the latest review. Auto-resolving.',
     })
