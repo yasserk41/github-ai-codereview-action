@@ -20,6 +20,7 @@ function raw(overrides: Partial<RawInputs> = {}): RawInputs {
     configPath: '.ai-review.yml',
     verdict: 'comment',
     requestChangesOn: 'critical',
+    adjudicateReplies: true,
     ...overrides,
   }
 }
@@ -90,4 +91,41 @@ describe('OpenAICompatibleProvider', () => {
     expect(body['response_format']).toEqual({ type: 'json_object' })
     expect(body['model']).toBe('glm-4.6')
   })
+
+  it('requests json_object for adjudicate and parses adjudication', async () => {
+    const adjudication = { resolved: true, response: 'Verified fix.' }
+    const create = vi
+      .fn()
+      .mockResolvedValue({ choices: [{ message: { content: JSON.stringify(adjudication) } }] })
+    const provider = new OpenAICompatibleProvider(
+      'glm-4.6',
+      'k',
+      'https://api.z.ai/api/paas/v4',
+      { chat: { completions: { create } } } as unknown as OpenAI,
+    )
+    const result = await provider.adjudicate('s', 'u')
+    expect(result).toEqual(adjudication)
+    const body = create.mock.calls[0][0] as Record<string, unknown>
+    expect(body['response_format']).toEqual({ type: 'json_object' })
+  })
+
+  it('retries once with repair instruction on invalid JSON in adjudicate', async () => {
+    const adjudication = { resolved: false, response: 'Not yet fixed.' }
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({ choices: [{ message: { content: 'not-json' } }] })
+      .mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify(adjudication) } }] })
+    const provider = new OpenAICompatibleProvider(
+      'glm-4.6',
+      'k',
+      'https://api.z.ai/api/paas/v4',
+      { chat: { completions: { create } } } as unknown as OpenAI,
+    )
+    const result = await provider.adjudicate('s', 'u')
+    expect(result).toEqual(adjudication)
+    expect(create).toHaveBeenCalledTimes(2)
+    const retryBody = create.mock.calls[1][0] as { messages: { content: string }[] }
+    expect(retryBody.messages[1].content).toContain('IMPORTANT')
+  })
 })
+

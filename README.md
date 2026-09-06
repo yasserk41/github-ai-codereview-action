@@ -68,6 +68,7 @@ The following inputs are defined in `action.yml`:
 | `config-path` | Path to the `.ai-review.yml` config file in the reviewed repo | No | `'.ai-review.yml'` |
 | `verdict` | Review submission mode: `comment` (always COMMENT) \| `auto` (approve when clean, request changes when severe findings) | No | `'comment'` |
 | `request-changes-on` | Minimum severity that triggers REQUEST_CHANGES when verdict is auto: `critical` \| `warning` \| `suggestion` | No | `'critical'` |
+| `adjudicate-replies` | Reply to a bot comment and let the AI decide whether the reply resolves the finding | No | `'true'` |
 
 ---
 
@@ -79,6 +80,7 @@ The following inputs are defined in `action.yml`:
 | `inline-comments` | Number of inline comments posted |
 | `verdict` | Submitted review verdict: `approved` \| `changes-requested` \| `commented` |
 | `resolved-threads` | Previous comment threads auto-resolved because their findings vanished |
+| `adjudication` | Reply adjudication outcome: `resolved` \| `unresolved` \| `skipped` (only set for `pull_request_review_comment` events) |
 
 ---
 
@@ -119,6 +121,68 @@ custom-instructions: |         # appended to the system prompt
 - **Diff truncation for large PRs:** For large changes exceeding ~70% of the model's context window, non-essential files are skipped first and remaining diffs are truncated. A clear truncation warning is included in the summary body so reviews remain transparent.
 - **Empty-findings LGTM:** When no issues meet or exceed the severity threshold, the action submits a friendly "LGTM — no issues found" summary review without posting empty comments.
 - **Unanchored findings:** If the LLM generates a finding for a line not modified in the pull request diff, the action safely downgrades it into the summary review table with a direct file and line reference, avoiding GitHub API validation errors.
+
+---
+
+## Reply Adjudication
+
+When developers reply to an inline bot review comment, the action can automatically adjudicate whether the reply (and any code updates) resolves the finding. If resolved, the AI replies with its reasoning and resolves the review thread. If not, it explains what is still missing and leaves the thread open.
+
+### Workflow Example
+
+To enable reply adjudication, add the `pull_request_review_comment` event alongside your `pull_request` triggers:
+
+```yaml
+name: AI Code Review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review_comment:
+    types: [created]
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: yasserk41/github-ai-codereview-action@v1
+        with:
+          provider: openai
+          adjudicate-replies: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+### Eligibility
+
+Reply adjudication only runs when:
+- The event is a reply to an existing comment (`in_reply_to_id` is present).
+- The root comment was created by the AI review bot (contains the bot marker).
+- The reply author is human (the bot ignores comments created by its own authenticated account, preventing self-trigger loops).
+- The thread is not already resolved.
+
+### Context Provided to AI
+
+When adjudicating, the LLM receives comprehensive context:
+- **Original finding:** The initial review comment verbatim.
+- **Discussion:** All thread replies formatted as `- @author: body`.
+- **Current file window:** The relevant source file centered around the finding line (`[line-60, line+60]`, up to 400 lines).
+- **File PR diff:** The pull request patch for the file (up to 8,000 characters).
+
+### Outcomes
+
+The AI decides whether the reply justifies non-fix (e.g. intentional design decision, issue does not apply) or the latest diff/code shows the issue is fixed. It responds in 1–3 sentences of markdown directly addressing the developer:
+- **`resolved`**: The AI posts its reasoning as a reply and resolves the review thread.
+- **`unresolved`**: The AI posts what is still missing and leaves the thread open.
+- **`skipped`**: Ineligible comments (self-reply, thread not found, already resolved, non-bot thread) are skipped without action.
+
+The outcome is set in the `adjudication` action output (`resolved`, `unresolved`, or `skipped`).
+
+### Disabling Adjudication
+
+Reply adjudication is enabled by default. To turn it off, set the `adjudicate-replies` input to `'false'` in your workflow.
 
 ---
 

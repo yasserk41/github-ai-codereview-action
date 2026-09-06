@@ -53006,6 +53006,7 @@ function readRawInputs(getInput = core.getInput) {
         configPath: getInput('config-path') || '.ai-review.yml',
         verdict: getInput('verdict') || 'comment',
         requestChangesOn: getInput('request-changes-on') || 'critical',
+        adjudicateReplies: getInput('adjudicate-replies') !== 'false',
     };
 }
 function resolveConfig(raw, repo, preset) {
@@ -53185,10 +53186,12 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.describeError = describeError;
+exports.run = run;
 const core = __importStar(__nccwpck_require__(37484));
 const github_1 = __nccwpck_require__(93228);
 const config_1 = __nccwpck_require__(22973);
 const review_1 = __nccwpck_require__(17491);
+const reply_1 = __nccwpck_require__(66279);
 const registry_1 = __nccwpck_require__(63307);
 const types_1 = __nccwpck_require__(42695);
 function describeError(err) {
@@ -53201,7 +53204,37 @@ function describeError(err) {
     return `Unexpected error: ${err instanceof Error ? err.stack ?? err.message : String(err)}`;
 }
 async function run() {
-    const pr = github_1.context.payload.pull_request;
+    const payload = github_1.context.payload;
+    if (github_1.context.eventName === 'pull_request_review_comment' &&
+        github_1.context.action === 'created' &&
+        payload.comment) {
+        const raw = (0, config_1.readRawInputs)();
+        if (!raw.adjudicateReplies) {
+            core.info('Reply adjudication disabled');
+            return;
+        }
+        if (!payload.comment.in_reply_to_id) {
+            core.info('Not a reply; nothing to do.');
+            return;
+        }
+        if (!payload.pull_request)
+            return;
+        const octokit = (0, github_1.getOctokit)(raw.githubToken);
+        const provider = (0, registry_1.createProvider)(raw);
+        const result = await (0, reply_1.runReplyReview)({
+            octokit,
+            repo: github_1.context.repo,
+            prNumber: payload.pull_request.number,
+            commentId: payload.comment.id,
+            commentAuthor: payload.comment.user?.login ?? '',
+            headSha: payload.pull_request.head.sha,
+            provider,
+        });
+        core.setOutput('adjudication', result.outcome);
+        core.info(`Reply adjudication: ${result.outcome}${result.reason ? ' (' + result.reason + ')' : ''}`);
+        return;
+    }
+    const pr = payload.pull_request;
     if (!pr) {
         core.info('Not a pull request event; nothing to do.');
         return;
@@ -53319,6 +53352,33 @@ class AnthropicProvider {
             return (0, types_1.parseFindings)(await ask(user + types_1.REPAIR_INSTRUCTION));
         }
     }
+    async adjudicate(system, user) {
+        const ask = async (u) => {
+            const response = await this.client.messages.create({
+                model: this.model,
+                max_tokens: 8192,
+                temperature: 0.1,
+                system,
+                messages: [{ role: 'user', content: u }],
+                tools: [
+                    {
+                        name: 'submit_adjudication',
+                        description: 'Submit your review reply adjudication',
+                        input_schema: types_1.ADJUDICATION_JSON_SCHEMA,
+                    },
+                ],
+                tool_choice: { type: 'tool', name: 'submit_adjudication' },
+            });
+            const block = response.content.find((b) => b.type === 'tool_use');
+            return block ? JSON.stringify(block.input) : '';
+        };
+        try {
+            return (0, types_1.parseAdjudication)(await ask(user));
+        }
+        catch {
+            return (0, types_1.parseAdjudication)(await ask(user + types_1.ADJUDICATION_REPAIR_INSTRUCTION));
+        }
+    }
 }
 exports.AnthropicProvider = AnthropicProvider;
 
@@ -53335,6 +53395,9 @@ exports.OpenAICompatibleProvider = void 0;
 const openai_1 = __nccwpck_require__(98238);
 class OpenAICompatibleProvider extends openai_1.OpenAIProvider {
     responseFormat() {
+        return { type: 'json_object' };
+    }
+    adjudicationResponseFormat() {
         return { type: 'json_object' };
     }
 }
@@ -53369,6 +53432,12 @@ class OpenAIProvider {
             json_schema: { name: 'findings', strict: true, schema: types_1.FINDINGS_JSON_SCHEMA },
         };
     }
+    adjudicationResponseFormat() {
+        return {
+            type: 'json_schema',
+            json_schema: { name: 'adjudication', strict: true, schema: types_1.ADJUDICATION_JSON_SCHEMA },
+        };
+    }
     async complete(system, user) {
         const ask = async (u) => {
             const response = await this.client.chat.completions.create({
@@ -53387,6 +53456,28 @@ class OpenAIProvider {
         }
         catch {
             return (0, types_1.parseFindings)(await ask(user + types_1.REPAIR_INSTRUCTION));
+        }
+    }
+    async adjudicate(system, user) {
+        const ask = async (u) => {
+            const response = await this.client.chat.completions.create({
+                model: this.model,
+                temperature: 0.1,
+                messages: [
+                    { role: 'system', content: system },
+                    { role: 'user', content: u },
+                ],
+                ...(this.adjudicationResponseFormat()
+                    ? { response_format: this.adjudicationResponseFormat() }
+                    : {}),
+            });
+            return response.choices[0]?.message?.content ?? '';
+        };
+        try {
+            return (0, types_1.parseAdjudication)(await ask(user));
+        }
+        catch {
+            return (0, types_1.parseAdjudication)(await ask(user + types_1.ADJUDICATION_REPAIR_INSTRUCTION));
         }
     }
 }
@@ -53487,8 +53578,9 @@ function createProvider(raw) {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.COMMENT_MARKER = exports.REPAIR_INSTRUCTION = exports.FINDINGS_JSON_SCHEMA = exports.ConfigError = exports.ProviderError = exports.FindingsPayloadSchema = exports.FindingSchema = exports.SEVERITY_RANK = exports.SEVERITIES = void 0;
+exports.COMMENT_MARKER = exports.REPAIR_INSTRUCTION = exports.FINDINGS_JSON_SCHEMA = exports.ADJUDICATION_REPAIR_INSTRUCTION = exports.ADJUDICATION_JSON_SCHEMA = exports.AdjudicationSchema = exports.ConfigError = exports.ProviderError = exports.FindingsPayloadSchema = exports.FindingSchema = exports.SEVERITY_RANK = exports.SEVERITIES = void 0;
 exports.parseFindings = parseFindings;
+exports.parseAdjudication = parseAdjudication;
 const zod_1 = __nccwpck_require__(50924);
 exports.SEVERITIES = ['critical', 'warning', 'suggestion'];
 exports.SEVERITY_RANK = {
@@ -53522,11 +53614,14 @@ class ConfigError extends Error {
     }
 }
 exports.ConfigError = ConfigError;
-function parseFindings(raw) {
-    const stripped = raw
+function stripMarkdownFences(raw) {
+    return raw
         .trim()
         .replace(/^```(?:json)?\s*/i, '')
         .replace(/\s*```$/, '');
+}
+function parseFindings(raw) {
+    const stripped = stripMarkdownFences(raw);
     let json;
     try {
         json = JSON.parse(stripped);
@@ -53542,6 +53637,36 @@ function parseFindings(raw) {
         throw new ProviderError(`LLM JSON did not match findings schema at "${issue.path.join('.')}": ${issue.message}`, raw);
     }
     return parsed.data.findings;
+}
+exports.AdjudicationSchema = zod_1.z.object({
+    resolved: zod_1.z.boolean(),
+    response: zod_1.z.string().min(1),
+});
+exports.ADJUDICATION_JSON_SCHEMA = {
+    type: 'object',
+    properties: {
+        resolved: { type: 'boolean' },
+        response: { type: 'string' },
+    },
+    required: ['resolved', 'response'],
+    additionalProperties: false,
+};
+exports.ADJUDICATION_REPAIR_INSTRUCTION = '\n\nIMPORTANT: Your previous response was not valid JSON matching the required schema. Respond again with ONLY the JSON object {"resolved":boolean,"response":string}. No prose, no markdown fences.';
+function parseAdjudication(raw) {
+    const stripped = stripMarkdownFences(raw);
+    let json;
+    try {
+        json = JSON.parse(stripped);
+    }
+    catch {
+        throw new ProviderError('LLM response was not valid JSON', raw);
+    }
+    const parsed = exports.AdjudicationSchema.safeParse(json);
+    if (!parsed.success) {
+        const issue = parsed.error.issues[0];
+        throw new ProviderError(`LLM JSON did not match adjudication schema at "${issue.path.join('.')}": ${issue.message}`, raw);
+    }
+    return parsed.data;
 }
 exports.FINDINGS_JSON_SCHEMA = {
     type: 'object',
@@ -53567,6 +53692,175 @@ exports.FINDINGS_JSON_SCHEMA = {
 };
 exports.REPAIR_INSTRUCTION = '\n\nIMPORTANT: Your previous response was not valid JSON matching the required schema. Respond again with ONLY the JSON object {"findings":[...]}. No prose, no markdown fences.';
 exports.COMMENT_MARKER = '<!-- ai-code-review-action -->';
+
+
+/***/ }),
+
+/***/ 66279:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.buildAdjudicationPrompts = buildAdjudicationPrompts;
+exports.fetchFileWindow = fetchFileWindow;
+exports.fetchFilePatch = fetchFilePatch;
+exports.runReplyReview = runReplyReview;
+const core = __importStar(__nccwpck_require__(37484));
+const diff_1 = __nccwpck_require__(19952);
+const threads_1 = __nccwpck_require__(26374);
+const types_1 = __nccwpck_require__(42695);
+function buildAdjudicationPrompts(root, discussion, fileContext, patch) {
+    const lineNum = root.line ?? root.originalLine ?? 1;
+    const system = [
+        'You are the AI code reviewer that left a review comment. A developer replied. Decide whether the discussion and the current code resolve the finding.',
+        'Rules:',
+        '- resolved=true only if the reply justifies non-fix (does not apply, intentional with valid justification) OR the current file/diff shows the issue fixed.',
+        '- response is 1-3 sentences of markdown addressing the developer directly.',
+        '- respond ONLY with JSON {"resolved":boolean,"response":string}',
+    ].join('\n');
+    const discussionLines = discussion.map((c) => `- @${c.author}: ${c.body}`).join('\n');
+    const user = [
+        '## Original finding',
+        '',
+        root.body,
+        '',
+        '## Discussion',
+        '',
+        discussionLines,
+        '',
+        `## Current file: ${root.path} (around line ${lineNum})`,
+        '',
+        '```',
+        fileContext,
+        '```',
+        '',
+        `## Changes in this PR for ${root.path}`,
+        '',
+        '```diff',
+        patch,
+        '```',
+        '',
+        'Does the discussion or the current code resolve the finding? Respond ONLY with JSON {"resolved":boolean,"response":string}.',
+    ].join('\n');
+    return { system, user };
+}
+async function fetchFileWindow(octokit, repo, path, ref, line, opts) {
+    try {
+        const client = octokit;
+        const res = await client.rest?.repos?.getContent?.({
+            owner: repo.owner,
+            repo: repo.repo,
+            path,
+            ref,
+        });
+        const data = res?.data;
+        if (!data || typeof data.content !== 'string') {
+            return '';
+        }
+        const decoded = Buffer.from(data.content, 'base64').toString('utf8');
+        const lines = decoded.split('\n');
+        const window = opts?.window ?? 60;
+        const maxLines = opts?.maxLines ?? 400;
+        let selectedLines;
+        if (lines.length <= 300) {
+            selectedLines = lines;
+        }
+        else {
+            const start = Math.max(1, line - window);
+            const end = Math.min(lines.length, line + window);
+            selectedLines = lines.slice(start - 1, end);
+        }
+        if (selectedLines.length > maxLines) {
+            return selectedLines.slice(0, maxLines).join('\n') + '\n[file truncated]';
+        }
+        return selectedLines.join('\n');
+    }
+    catch {
+        return '';
+    }
+}
+async function fetchFilePatch(octokit, repo, prNumber, path) {
+    const files = await (0, diff_1.fetchPrFiles)(octokit, repo, prNumber);
+    const file = files.find((f) => f.filename === path);
+    if (!file || typeof file.patch !== 'string') {
+        return '';
+    }
+    if (file.patch.length > 8000) {
+        return file.patch.slice(0, 8000) + '\n[patch truncated]';
+    }
+    return file.patch;
+}
+async function runReplyReview(deps) {
+    const client = deps.octokit;
+    const authRes = await client.rest?.users?.getAuthenticated?.();
+    const own = authRes?.data?.login;
+    if (deps.commentAuthor === own) {
+        return { outcome: 'skipped', reason: 'self' };
+    }
+    const threads = await (0, threads_1.getAllReviewThreads)(deps.octokit, deps.repo, deps.prNumber);
+    const thread = threads.find((t) => t.comments.some((c) => c.id === deps.commentId));
+    if (!thread) {
+        return { outcome: 'skipped', reason: 'not-found' };
+    }
+    if (thread.isResolved) {
+        return { outcome: 'skipped', reason: 'already-resolved' };
+    }
+    const root = thread.comments[0];
+    if (!root || root.id === deps.commentId) {
+        return { outcome: 'skipped', reason: 'root-comment' };
+    }
+    if (!root.body.includes(types_1.COMMENT_MARKER)) {
+        return { outcome: 'skipped', reason: 'not-bot-thread' };
+    }
+    const patch = await fetchFilePatch(deps.octokit, deps.repo, deps.prNumber, root.path);
+    const window = await fetchFileWindow(deps.octokit, deps.repo, root.path, deps.headSha, root.line ?? root.originalLine ?? 1);
+    const { system, user } = buildAdjudicationPrompts(root, thread.comments.slice(1), window, patch);
+    const result = await deps.provider.adjudicate(system, user);
+    try {
+        await (0, threads_1.replyToComment)(deps.octokit, deps.repo, deps.prNumber, root.id, `${types_1.COMMENT_MARKER}\n${result.response}`);
+        if (result.resolved) {
+            await (0, threads_1.resolveThread)(deps.octokit, thread.threadId);
+        }
+    }
+    catch (err) {
+        core.warning(`Failed to reply to comment or resolve thread: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return { outcome: result.resolved ? 'resolved' : 'unresolved' };
+}
 
 
 /***/ }),
@@ -53714,6 +54008,7 @@ async function runReview(deps) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.RESOLVE_REPLY_BODY = void 0;
 exports.getBotThreads = getBotThreads;
+exports.getAllReviewThreads = getAllReviewThreads;
 exports.resolveThread = resolveThread;
 exports.replyToComment = replyToComment;
 exports.planReconciliation = planReconciliation;
@@ -53774,6 +54069,53 @@ async function getBotThreads(octokit, repo, prNumber) {
         });
     }
     return threads;
+}
+async function getAllReviewThreads(octokit, repo, prNumber) {
+    const client = octokit;
+    const query = `
+    query($owner: String!, $repo: String!, $prNumber: Int!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $prNumber) {
+          reviewThreads(first: 100) {
+            nodes {
+              id
+              isResolved
+              comments(first: 50) {
+                nodes {
+                  databaseId
+                  author {
+                    login
+                  }
+                  body
+                  path
+                  line
+                  originalLine
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+    const data = (await client.graphql(query, {
+        owner: repo.owner,
+        repo: repo.repo,
+        prNumber,
+    }));
+    const nodes = data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+    return nodes.map((node) => ({
+        threadId: node.id,
+        isResolved: node.isResolved,
+        comments: (node.comments?.nodes ?? []).map((c) => ({
+            id: c.databaseId,
+            author: c.author?.login ?? '',
+            body: c.body ?? '',
+            path: c.path,
+            line: c.line ?? null,
+            originalLine: c.originalLine ?? null,
+        })),
+    }));
 }
 async function resolveThread(octokit, threadId) {
     const client = octokit;

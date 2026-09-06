@@ -5,6 +5,7 @@ import {
   getBotThreads,
   resolveThread,
   replyToComment,
+  getAllReviewThreads,
   RESOLVE_REPLY_BODY,
   type BotThread,
 } from '../src/threads'
@@ -215,3 +216,107 @@ describe('replyToComment', () => {
     })
   })
 })
+
+describe('getAllReviewThreads', () => {
+  it('maps the GraphQL fixture including author logins and null line -> originalLine without filtering', async () => {
+    const graphqlFixture = {
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            nodes: [
+              {
+                id: 't-1',
+                isResolved: true,
+                comments: {
+                  nodes: [
+                    {
+                      databaseId: 101,
+                      author: { login: 'bot-user' },
+                      body: 'Finding details',
+                      path: 'src/a.ts',
+                      line: 10,
+                      originalLine: 10,
+                    },
+                  ],
+                },
+              },
+              {
+                id: 't-2',
+                isResolved: false,
+                comments: {
+                  nodes: [
+                    {
+                      databaseId: 102,
+                      author: { login: 'reviewer' },
+                      body: 'Initial comment',
+                      path: 'src/b.ts',
+                      line: null,
+                      originalLine: 25,
+                    },
+                    {
+                      databaseId: 103,
+                      author: { login: 'dev' },
+                      body: 'Fixed in commit abc',
+                      path: 'src/b.ts',
+                      line: null,
+                      originalLine: 25,
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      },
+    }
+
+    const graphql = vi.fn().mockResolvedValue(graphqlFixture)
+    const octokit = { graphql } as unknown as Octokit
+
+    const threads = await getAllReviewThreads(octokit, { owner: 'o', repo: 'r' }, 42)
+
+    expect(graphql).toHaveBeenCalledWith(
+      expect.stringContaining('reviewThreads'),
+      { owner: 'o', repo: 'r', prNumber: 42 },
+    )
+    expect(threads).toEqual([
+      {
+        threadId: 't-1',
+        isResolved: true,
+        comments: [
+          {
+            id: 101,
+            author: 'bot-user',
+            body: 'Finding details',
+            path: 'src/a.ts',
+            line: 10,
+            originalLine: 10,
+          },
+        ],
+      },
+      {
+        threadId: 't-2',
+        isResolved: false,
+        comments: [
+          {
+            id: 102,
+            author: 'reviewer',
+            body: 'Initial comment',
+            path: 'src/b.ts',
+            line: null,
+            originalLine: 25,
+          },
+          {
+            id: 103,
+            author: 'dev',
+            body: 'Fixed in commit abc',
+            path: 'src/b.ts',
+            line: null,
+            originalLine: 25,
+          },
+        ],
+      },
+    ])
+  })
+})
+

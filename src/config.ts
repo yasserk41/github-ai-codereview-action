@@ -35,6 +35,7 @@ export interface RawInputs {
   configPath: string
   verdict: string
   requestChangesOn: string
+  adjudicateReplies: boolean
 }
 
 export async function loadRepoConfig(path: string): Promise<RepoConfig> {
@@ -86,6 +87,7 @@ export function readRawInputs(
     configPath: getInput('config-path') || '.ai-review.yml',
     verdict: getInput('verdict') || 'comment',
     requestChangesOn: getInput('request-changes-on') || 'critical',
+    adjudicateReplies: getInput('adjudicate-replies') !== 'false',
   }
 }
 

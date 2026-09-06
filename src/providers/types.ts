@@ -37,11 +37,15 @@ export class ConfigError extends Error {
   }
 }
 
-export function parseFindings(raw: string): Finding[] {
-  const stripped = raw
+function stripMarkdownFences(raw: string): string {
+  return raw
     .trim()
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/, '')
+}
+
+export function parseFindings(raw: string): Finding[] {
+  const stripped = stripMarkdownFences(raw)
   let json: unknown
   try {
     json = JSON.parse(stripped)
@@ -58,6 +62,45 @@ export function parseFindings(raw: string): Finding[] {
     )
   }
   return parsed.data.findings
+}
+
+export const AdjudicationSchema = z.object({
+  resolved: z.boolean(),
+  response: z.string().min(1),
+})
+
+export type Adjudication = z.infer<typeof AdjudicationSchema>
+
+export const ADJUDICATION_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    resolved: { type: 'boolean' },
+    response: { type: 'string' },
+  },
+  required: ['resolved', 'response'],
+  additionalProperties: false,
+} as const
+
+export const ADJUDICATION_REPAIR_INSTRUCTION =
+  '\n\nIMPORTANT: Your previous response was not valid JSON matching the required schema. Respond again with ONLY the JSON object {"resolved":boolean,"response":string}. No prose, no markdown fences.'
+
+export function parseAdjudication(raw: string): Adjudication {
+  const stripped = stripMarkdownFences(raw)
+  let json: unknown
+  try {
+    json = JSON.parse(stripped)
+  } catch {
+    throw new ProviderError('LLM response was not valid JSON', raw)
+  }
+  const parsed = AdjudicationSchema.safeParse(json)
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0]
+    throw new ProviderError(
+      `LLM JSON did not match adjudication schema at "${issue.path.join('.')}": ${issue.message}`,
+      raw,
+    )
+  }
+  return parsed.data
 }
 
 export const FINDINGS_JSON_SCHEMA = {
@@ -115,4 +158,5 @@ export interface ReviewConfig {
 
 export interface ReviewProvider {
   complete(system: string, user: string): Promise<Finding[]>
+  adjudicate(system: string, user: string): Promise<Adjudication>
 }

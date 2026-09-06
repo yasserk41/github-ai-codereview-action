@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import type OpenAI from 'openai'
 import { OpenAIProvider } from '../../src/providers/openai'
-import type { Finding } from '../../src/providers/types'
+import { ADJUDICATION_JSON_SCHEMA, type Finding } from '../../src/providers/types'
 
 const finding: Finding = {
   file: 'src/app.ts',
@@ -59,3 +59,34 @@ describe('OpenAIProvider.complete', () => {
     await expect(provider.complete('system', 'user')).rejects.toThrow(/not valid JSON/)
   })
 })
+
+describe('OpenAIProvider.adjudicate', () => {
+  it('returns parsed adjudication and requests json_schema output with ADJUDICATION_JSON_SCHEMA', async () => {
+    const adjudication = { resolved: true, response: 'Issue resolved by adding bounds check.' }
+    const { provider, calls } = providerWith([JSON.stringify(adjudication)])
+    const result = await provider.adjudicate('system', 'user')
+    expect(result).toEqual(adjudication)
+    const body = calls()[0][0] as Record<string, unknown>
+    expect(body['model']).toBe('gpt-4.1')
+    expect(body['response_format']).toEqual({
+      type: 'json_schema',
+      json_schema: { name: 'adjudication', strict: true, schema: ADJUDICATION_JSON_SCHEMA },
+    })
+  })
+
+  it('retries once with repair instruction on invalid JSON', async () => {
+    const adjudication = { resolved: false, response: 'Missing tests.' }
+    const { provider, calls } = providerWith(['invalid', JSON.stringify(adjudication)])
+    const result = await provider.adjudicate('system', 'user')
+    expect(result).toEqual(adjudication)
+    expect(calls()).toHaveLength(2)
+    const retryBody = calls()[1][0] as { messages: { content: string }[] }
+    expect(retryBody.messages[1].content).toContain('IMPORTANT')
+  })
+
+  it('throws ProviderError when adjudication retry also fails', async () => {
+    const { provider } = providerWith(['invalid', 'still invalid'])
+    await expect(provider.adjudicate('system', 'user')).rejects.toThrow(/not valid JSON/)
+  })
+})
+

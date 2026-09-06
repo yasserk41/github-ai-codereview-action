@@ -37,6 +37,10 @@ inputs:
     description: 'Minimum severity that triggers REQUEST_CHANGES when verdict is auto: critical | warning | suggestion'
     required: false
     default: 'critical'
+  adjudicate-replies:
+    description: 'Reply to a bot comment and let the AI decide whether the reply resolves the finding'
+    required: false
+    default: 'true'
 outputs:
   findings-count:
     description: 'Total findings reported'
@@ -46,6 +50,8 @@ outputs:
     description: 'Submitted review verdict: approved | changes-requested | commented'
   resolved-threads:
     description: 'Previous comment threads auto-resolved because their findings vanished'
+  adjudication:
+    description: 'Reply adjudication outcome: resolved | unresolved | skipped - only set for pull_request_review_comment events'
 runs:
   using: 'node20'
   main: 'dist/index.js'

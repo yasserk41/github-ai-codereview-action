@@ -11,8 +11,24 @@ export interface BotThread {
 
 export const RESOLVE_REPLY_BODY = `${COMMENT_MARKER}\nFix verified — this issue was not flagged in the latest review. Auto-resolving.`
 
+export interface ThreadComment {
+  id: number
+  author: string
+  body: string
+  path: string
+  line: number | null
+  originalLine: number | null
+}
+
+export interface ReviewThreadData {
+  threadId: string
+  isResolved: boolean
+  comments: ThreadComment[]
+}
+
 interface GraphQLCommentNode {
   databaseId: number
+  author?: { login: string } | null
   body?: string
   path: string
   line?: number | null
@@ -114,6 +130,59 @@ export async function getBotThreads(
   }
 
   return threads
+}
+
+export async function getAllReviewThreads(
+  octokit: Octokit,
+  repo: { owner: string; repo: string },
+  prNumber: number,
+): Promise<ReviewThreadData[]> {
+  const client = octokit as unknown as OctokitThreadsClient
+  const query = `
+    query($owner: String!, $repo: String!, $prNumber: Int!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $prNumber) {
+          reviewThreads(first: 100) {
+            nodes {
+              id
+              isResolved
+              comments(first: 50) {
+                nodes {
+                  databaseId
+                  author {
+                    login
+                  }
+                  body
+                  path
+                  line
+                  originalLine
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `
+  const data = (await client.graphql(query, {
+    owner: repo.owner,
+    repo: repo.repo,
+    prNumber,
+  })) as GraphQLQueryResult
+
+  const nodes = data?.repository?.pullRequest?.reviewThreads?.nodes ?? []
+  return nodes.map((node) => ({
+    threadId: node.id,
+    isResolved: node.isResolved,
+    comments: (node.comments?.nodes ?? []).map((c) => ({
+      id: c.databaseId,
+      author: c.author?.login ?? '',
+      body: c.body ?? '',
+      path: c.path,
+      line: c.line ?? null,
+      originalLine: c.originalLine ?? null,
+    })),
+  }))
 }
 
 export async function resolveThread(

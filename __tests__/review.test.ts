@@ -18,6 +18,7 @@ const finding: Finding = {
 function fakeProvider(findings: Finding[]): ReviewProvider {
   return {
     complete: vi.fn().mockResolvedValue(findings),
+    adjudicate: vi.fn(),
   }
 }
 
@@ -72,6 +73,7 @@ const raw: RawInputs = {
   configPath: '.ai-review.yml',
   verdict: 'comment',
   requestChangesOn: 'critical',
+  adjudicateReplies: true,
 }
 
 const repoConfig: RepoConfig = {

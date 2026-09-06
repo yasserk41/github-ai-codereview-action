@@ -94,6 +94,12 @@ describe('readRawInputs', () => {
     expect(raw.verdict).toBe('auto')
     expect(raw.requestChangesOn).toBe('warning')
   })
+
+  it('parses adjudicate-replies defaulting true (false -> false)', () => {
+    expect(readRawInputs(() => '').adjudicateReplies).toBe(true)
+    expect(readRawInputs((name) => (name === 'adjudicate-replies' ? 'true' : '')).adjudicateReplies).toBe(true)
+    expect(readRawInputs((name) => (name === 'adjudicate-replies' ? 'false' : '')).adjudicateReplies).toBe(false)
+  })
 })
 
 describe('resolveConfig', () => {

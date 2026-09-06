@@ -2,7 +2,8 @@ import * as core from '@actions/core'
 import { context, getOctokit } from '@actions/github'
 import { loadRepoConfig, readRawInputs } from './config'
 import { runReview } from './review'
-import { ProviderConfigError } from './providers/registry'
+import { runReplyReview } from './reply'
+import { createProvider, ProviderConfigError } from './providers/registry'
 import { ConfigError, ProviderError } from './providers/types'
 
 export function describeError(err: unknown): string {
@@ -17,8 +18,51 @@ export function describeError(err: unknown): string {
   return `Unexpected error: ${err instanceof Error ? err.stack ?? err.message : String(err)}`
 }
 
-async function run(): Promise<void> {
-  const pr = context.payload.pull_request
+export async function run(): Promise<void> {
+  const payload = context.payload as {
+    comment?: { id: number; user?: { login: string }; in_reply_to_id?: number }
+    pull_request?: {
+      number: number
+      title?: string
+      body?: string
+      head: { sha: string }
+    }
+  }
+
+  if (
+    context.eventName === 'pull_request_review_comment' &&
+    context.action === 'created' &&
+    payload.comment
+  ) {
+    const raw = readRawInputs()
+    if (!raw.adjudicateReplies) {
+      core.info('Reply adjudication disabled')
+      return
+    }
+    if (!payload.comment.in_reply_to_id) {
+      core.info('Not a reply; nothing to do.')
+      return
+    }
+    if (!payload.pull_request) return
+    const octokit = getOctokit(raw.githubToken)
+    const provider = createProvider(raw)
+    const result = await runReplyReview({
+      octokit,
+      repo: context.repo,
+      prNumber: payload.pull_request.number,
+      commentId: payload.comment.id,
+      commentAuthor: payload.comment.user?.login ?? '',
+      headSha: payload.pull_request.head.sha,
+      provider,
+    })
+    core.setOutput('adjudication', result.outcome)
+    core.info(
+      `Reply adjudication: ${result.outcome}${result.reason ? ' (' + result.reason + ')' : ''}`,
+    )
+    return
+  }
+
+  const pr = payload.pull_request
   if (!pr) {
     core.info('Not a pull request event; nothing to do.')
     return

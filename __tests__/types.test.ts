@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { parseFindings, ProviderError, SEVERITY_RANK } from '../src/providers/types'
+import {
+  parseFindings,
+  parseAdjudication,
+  AdjudicationSchema,
+  ADJUDICATION_JSON_SCHEMA,
+  ProviderError,
+  SEVERITY_RANK,
+} from '../src/providers/types'
 
 const finding = {
   file: 'src/app.ts',
@@ -43,3 +50,42 @@ describe('SEVERITY_RANK', () => {
     expect(SEVERITY_RANK.warning).toBeGreaterThan(SEVERITY_RANK.suggestion)
   })
 })
+
+describe('AdjudicationSchema and ADJUDICATION_JSON_SCHEMA', () => {
+  it('validates schema and matches json schema structure', () => {
+    const valid = { resolved: true, response: 'Looks good' }
+    expect(AdjudicationSchema.parse(valid)).toEqual(valid)
+    expect(ADJUDICATION_JSON_SCHEMA).toEqual({
+      type: 'object',
+      properties: {
+        resolved: { type: 'boolean' },
+        response: { type: 'string' },
+      },
+      required: ['resolved', 'response'],
+      additionalProperties: false,
+    })
+  })
+})
+
+describe('parseAdjudication', () => {
+  it('parses valid adjudication JSON', () => {
+    const data = { resolved: true, response: 'The issue has been resolved.' }
+    expect(parseAdjudication(JSON.stringify(data))).toEqual(data)
+  })
+
+  it('strips markdown code fences', () => {
+    const data = { resolved: false, response: 'Still missing null check.' }
+    const fenced = '```json\n' + JSON.stringify(data) + '\n```'
+    expect(parseAdjudication(fenced)).toEqual(data)
+  })
+
+  it('throws ProviderError on invalid JSON', () => {
+    expect(() => parseAdjudication('not a json')).toThrow(ProviderError)
+  })
+
+  it('throws ProviderError when schema does not match', () => {
+    expect(() => parseAdjudication(JSON.stringify({ resolved: 'not-bool' }))).toThrow(ProviderError)
+    expect(() => parseAdjudication(JSON.stringify({ resolved: true, response: '' }))).toThrow(ProviderError)
+  })
+})
+

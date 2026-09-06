@@ -1,9 +1,13 @@
 import Anthropic from '@anthropic-ai/sdk'
 import {
   FINDINGS_JSON_SCHEMA,
+  ADJUDICATION_JSON_SCHEMA,
   parseFindings,
+  parseAdjudication,
   REPAIR_INSTRUCTION,
+  ADJUDICATION_REPAIR_INSTRUCTION,
   type Finding,
+  type Adjudication,
   type ReviewProvider,
 } from './types'
 
@@ -44,6 +48,35 @@ export class AnthropicProvider implements ReviewProvider {
       return parseFindings(await ask(user))
     } catch {
       return parseFindings(await ask(user + REPAIR_INSTRUCTION))
+    }
+  }
+
+  async adjudicate(system: string, user: string): Promise<Adjudication> {
+    const ask = async (u: string): Promise<string> => {
+      const response = await this.client.messages.create({
+        model: this.model,
+        max_tokens: 8192,
+        temperature: 0.1,
+        system,
+        messages: [{ role: 'user', content: u }],
+        tools: [
+          {
+            name: 'submit_adjudication',
+            description: 'Submit your review reply adjudication',
+            input_schema: ADJUDICATION_JSON_SCHEMA as unknown as Anthropic.Tool.InputSchema,
+          },
+        ],
+        tool_choice: { type: 'tool', name: 'submit_adjudication' },
+      })
+      const block = response.content.find(
+        (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
+      )
+      return block ? JSON.stringify(block.input) : ''
+    }
+    try {
+      return parseAdjudication(await ask(user))
+    } catch {
+      return parseAdjudication(await ask(user + ADJUDICATION_REPAIR_INSTRUCTION))
     }
   }
 }
