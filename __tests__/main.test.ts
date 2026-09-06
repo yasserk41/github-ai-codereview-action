@@ -30,12 +30,11 @@ describe('main run event routing', () => {
   it('logs and returns when adjudicateReplies is false for reply event', async () => {
     const infoSpy = vi.spyOn(core, 'info').mockImplementation(() => {})
     const origEvent = context.eventName
-    const origAction = context.action
     const origPayload = context.payload
     try {
       context.eventName = 'pull_request_review_comment'
-      context.action = 'created'
       context.payload = {
+        action: 'created',
         comment: { id: 10, in_reply_to_id: 5 },
         pull_request: { number: 1, head: { sha: 'sha' } },
       }
@@ -55,7 +54,6 @@ describe('main run event routing', () => {
       expect(infoSpy).toHaveBeenCalledWith('Reply adjudication disabled')
     } finally {
       context.eventName = origEvent
-      context.action = origAction
       context.payload = origPayload
       vi.restoreAllMocks()
     }
@@ -64,12 +62,11 @@ describe('main run event routing', () => {
   it('logs and returns when comment is not a reply', async () => {
     const infoSpy = vi.spyOn(core, 'info').mockImplementation(() => {})
     const origEvent = context.eventName
-    const origAction = context.action
     const origPayload = context.payload
     try {
       context.eventName = 'pull_request_review_comment'
-      context.action = 'created'
       context.payload = {
+        action: 'created',
         comment: { id: 10 },
         pull_request: { number: 1, head: { sha: 'sha' } },
       }
@@ -89,7 +86,6 @@ describe('main run event routing', () => {
       expect(infoSpy).toHaveBeenCalledWith('Not a reply; nothing to do.')
     } finally {
       context.eventName = origEvent
-      context.action = origAction
       context.payload = origPayload
       vi.restoreAllMocks()
     }
@@ -99,14 +95,13 @@ describe('main run event routing', () => {
     const setOutputSpy = vi.spyOn(core, 'setOutput').mockImplementation(() => {})
     const infoSpy = vi.spyOn(core, 'info').mockImplementation(() => {})
     const origEvent = context.eventName
-    const origAction = context.action
     const origPayload = context.payload
     const origRepo = process.env.GITHUB_REPOSITORY
     try {
       process.env.GITHUB_REPOSITORY = 'test-owner/test-repo'
       context.eventName = 'pull_request_review_comment'
-      context.action = 'created'
       context.payload = {
+        action: 'created',
         comment: { id: 10, in_reply_to_id: 5, user: { login: 'dev' } },
         pull_request: { number: 1, head: { sha: 'sha' } },
       }
@@ -143,7 +138,6 @@ describe('main run event routing', () => {
     } finally {
       process.env.GITHUB_REPOSITORY = origRepo
       context.eventName = origEvent
-      context.action = origAction
       context.payload = origPayload
       vi.restoreAllMocks()
     }

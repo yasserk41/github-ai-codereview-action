@@ -18,9 +18,16 @@ export function describeError(err: unknown): string {
   return `Unexpected error: ${err instanceof Error ? err.stack ?? err.message : String(err)}`
 }
 
+export function isReplyAdjudicationEvent(
+  eventName: string,
+  payload: { action?: string; comment?: { id: number; in_reply_to_id?: number } },
+): boolean {
+  return eventName === 'pull_request_review_comment' && payload.action === 'created' && !!payload.comment
+}
+
 export async function run(): Promise<void> {
   const payload = context.payload as {
-    comment?: { id: number; user?: { login: string }; in_reply_to_id?: number }
+    comment?: { id: number; user?: { login: string }; body?: string; in_reply_to_id?: number }
     pull_request?: {
       number: number
       title?: string
@@ -29,11 +36,8 @@ export async function run(): Promise<void> {
     }
   }
 
-  if (
-    context.eventName === 'pull_request_review_comment' &&
-    context.action === 'created' &&
-    payload.comment
-  ) {
+  if (isReplyAdjudicationEvent(context.eventName, context.payload as { action?: string })) {
+    if (!payload.comment) return
     const raw = readRawInputs()
     if (!raw.adjudicateReplies) {
       core.info('Reply adjudication disabled')
@@ -52,6 +56,7 @@ export async function run(): Promise<void> {
       prNumber: payload.pull_request.number,
       commentId: payload.comment.id,
       commentAuthor: payload.comment.user?.login ?? '',
+      commentBody: payload.comment.body ?? '',
       headSha: payload.pull_request.head.sha,
       provider,
     })

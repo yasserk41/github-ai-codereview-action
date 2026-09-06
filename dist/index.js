@@ -53186,6 +53186,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.describeError = describeError;
+exports.isReplyAdjudicationEvent = isReplyAdjudicationEvent;
 exports.run = run;
 const core = __importStar(__nccwpck_require__(37484));
 const github_1 = __nccwpck_require__(93228);
@@ -53203,11 +53204,14 @@ function describeError(err) {
     }
     return `Unexpected error: ${err instanceof Error ? err.stack ?? err.message : String(err)}`;
 }
+function isReplyAdjudicationEvent(eventName, payload) {
+    return eventName === 'pull_request_review_comment' && payload.action === 'created' && !!payload.comment;
+}
 async function run() {
     const payload = github_1.context.payload;
-    if (github_1.context.eventName === 'pull_request_review_comment' &&
-        github_1.context.action === 'created' &&
-        payload.comment) {
+    if (isReplyAdjudicationEvent(github_1.context.eventName, github_1.context.payload)) {
+        if (!payload.comment)
+            return;
         const raw = (0, config_1.readRawInputs)();
         if (!raw.adjudicateReplies) {
             core.info('Reply adjudication disabled');
@@ -53227,6 +53231,7 @@ async function run() {
             prNumber: payload.pull_request.number,
             commentId: payload.comment.id,
             commentAuthor: payload.comment.user?.login ?? '',
+            commentBody: payload.comment.body ?? '',
             headSha: payload.pull_request.head.sha,
             provider,
         });
@@ -53825,10 +53830,7 @@ async function fetchFilePatch(octokit, repo, prNumber, path) {
     return file.patch;
 }
 async function runReplyReview(deps) {
-    const client = deps.octokit;
-    const authRes = await client.rest?.users?.getAuthenticated?.();
-    const own = authRes?.data?.login;
-    if (deps.commentAuthor === own) {
+    if (deps.commentBody.includes(types_1.COMMENT_MARKER)) {
         return { outcome: 'skipped', reason: 'self' };
     }
     const threads = await (0, threads_1.getAllReviewThreads)(deps.octokit, deps.repo, deps.prNumber);
@@ -53845,6 +53847,9 @@ async function runReplyReview(deps) {
     }
     if (!root.body.includes(types_1.COMMENT_MARKER)) {
         return { outcome: 'skipped', reason: 'not-bot-thread' };
+    }
+    if (deps.commentAuthor === root.author) {
+        return { outcome: 'skipped', reason: 'self' };
     }
     const patch = await fetchFilePatch(deps.octokit, deps.repo, deps.prNumber, root.path);
     const window = await fetchFileWindow(deps.octokit, deps.repo, root.path, deps.headSha, root.line ?? root.originalLine ?? 1);

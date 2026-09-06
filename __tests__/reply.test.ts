@@ -176,30 +176,55 @@ describe('runReplyReview', () => {
     }
   })
 
-  function makeDeps(commentId: number, commentAuthor: string): ReplyDeps {
+  function makeDeps(commentId: number, commentAuthor: string, commentBody = 'I addressed this'): ReplyDeps {
     return {
       octokit: mockOctokit,
       repo: { owner: 'o', repo: 'r' },
       prNumber: 99,
       commentId,
       commentAuthor,
+      commentBody,
       headSha: 'head-sha-123',
       provider: mockProvider,
     }
   }
 
-  it('skips when commentAuthor is the authenticated bot user (self-loop guard)', async () => {
-    const getAuthenticated = vi.fn().mockResolvedValue({ data: { login: 'ai-bot[bot]' } })
-    mockOctokit = {
-      rest: { users: { getAuthenticated } },
-    } as unknown as Octokit
+  it('skips when the triggering comment carries the bot marker (self-loop guard)', async () => {
+    mockOctokit = {} as unknown as Octokit
+    const result = await runReplyReview(
+      makeDeps(100, 'ai-bot[bot]', `${COMMENT_MARKER}\nprevious adjudication`),
+    )
+    expect(result).toEqual({ outcome: 'skipped', reason: 'self' })
+  })
 
-    const result = await runReplyReview(makeDeps(100, 'ai-bot[bot]'))
+  it('skips when the replier is the author of the root finding (bot identity)', async () => {
+    const threadsFixture = {
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            nodes: [
+              {
+                id: 'thread-1',
+                isResolved: false,
+                comments: {
+                  nodes: [
+                    { databaseId: 10, author: { login: 'ai-bot[bot]' }, body: `${COMMENT_MARKER}\nFinding`, path: 'a.ts' },
+                    { databaseId: 11, author: { login: 'ai-bot[bot]' }, body: 'bot self reply', path: 'a.ts' },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      },
+    }
+    graphql.mockResolvedValue(threadsFixture)
+    mockOctokit = { graphql } as unknown as Octokit
+    const result = await runReplyReview(makeDeps(11, 'ai-bot[bot]', 'bot self reply'))
     expect(result).toEqual({ outcome: 'skipped', reason: 'self' })
   })
 
   it('skips when thread is not found for commentId', async () => {
-    const getAuthenticated = vi.fn().mockResolvedValue({ data: { login: 'ai-bot[bot]' } })
     const threadsFixture = {
       repository: {
         pullRequest: {
@@ -212,7 +237,7 @@ describe('runReplyReview', () => {
     graphql.mockResolvedValue(threadsFixture)
     mockOctokit = {
       graphql,
-      rest: { users: { getAuthenticated } },
+      rest: {},
     } as unknown as Octokit
 
     const result = await runReplyReview(makeDeps(100, 'human-dev'))
@@ -220,7 +245,6 @@ describe('runReplyReview', () => {
   })
 
   it('skips when thread is already resolved', async () => {
-    const getAuthenticated = vi.fn().mockResolvedValue({ data: { login: 'ai-bot[bot]' } })
     const threadsFixture = {
       repository: {
         pullRequest: {
@@ -244,7 +268,7 @@ describe('runReplyReview', () => {
     graphql.mockResolvedValue(threadsFixture)
     mockOctokit = {
       graphql,
-      rest: { users: { getAuthenticated } },
+      rest: {},
     } as unknown as Octokit
 
     const result = await runReplyReview(makeDeps(11, 'human-dev'))
@@ -252,7 +276,6 @@ describe('runReplyReview', () => {
   })
 
   it('skips when the comment is the root comment', async () => {
-    const getAuthenticated = vi.fn().mockResolvedValue({ data: { login: 'ai-bot[bot]' } })
     const threadsFixture = {
       repository: {
         pullRequest: {
@@ -273,7 +296,7 @@ describe('runReplyReview', () => {
     graphql.mockResolvedValue(threadsFixture)
     mockOctokit = {
       graphql,
-      rest: { users: { getAuthenticated } },
+      rest: {},
     } as unknown as Octokit
 
     const result = await runReplyReview(makeDeps(10, 'human-dev'))
@@ -281,7 +304,6 @@ describe('runReplyReview', () => {
   })
 
   it('skips when root comment does not have COMMENT_MARKER', async () => {
-    const getAuthenticated = vi.fn().mockResolvedValue({ data: { login: 'ai-bot[bot]' } })
     const threadsFixture = {
       repository: {
         pullRequest: {
@@ -305,7 +327,7 @@ describe('runReplyReview', () => {
     graphql.mockResolvedValue(threadsFixture)
     mockOctokit = {
       graphql,
-      rest: { users: { getAuthenticated } },
+      rest: {},
     } as unknown as Octokit
 
     const result = await runReplyReview(makeDeps(11, 'human-dev'))
@@ -313,7 +335,6 @@ describe('runReplyReview', () => {
   })
 
   it('handles resolved adjudication: posts reply with marker and resolves thread', async () => {
-    const getAuthenticated = vi.fn().mockResolvedValue({ data: { login: 'ai-bot[bot]' } })
     const threadsFixture = {
       repository: {
         pullRequest: {
@@ -344,7 +365,6 @@ describe('runReplyReview', () => {
       graphql,
       paginate,
       rest: {
-        users: { getAuthenticated },
         repos: { getContent },
         pulls: { createReplyForReviewComment: createReply },
       },
@@ -367,7 +387,6 @@ describe('runReplyReview', () => {
   })
 
   it('handles unresolved adjudication: posts reply and does not resolve thread', async () => {
-    const getAuthenticated = vi.fn().mockResolvedValue({ data: { login: 'ai-bot[bot]' } })
     const threadsFixture = {
       repository: {
         pullRequest: {
@@ -402,7 +421,6 @@ describe('runReplyReview', () => {
       graphql,
       paginate,
       rest: {
-        users: { getAuthenticated },
         repos: { getContent },
         pulls: { createReplyForReviewComment: createReply },
       },
@@ -424,7 +442,6 @@ describe('runReplyReview', () => {
   })
 
   it('warns and continues if posting reply or resolving thread fails', async () => {
-    const getAuthenticated = vi.fn().mockResolvedValue({ data: { login: 'ai-bot[bot]' } })
     const threadsFixture = {
       repository: {
         pullRequest: {
@@ -456,7 +473,6 @@ describe('runReplyReview', () => {
       graphql,
       paginate,
       rest: {
-        users: { getAuthenticated },
         repos: { getContent },
         pulls: { createReplyForReviewComment: createReply },
       },

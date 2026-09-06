@@ -15,6 +15,7 @@ export interface ReplyDeps {
   prNumber: number
   commentId: number
   commentAuthor: string
+  commentBody: string
   headSha: string
   provider: ReviewProvider
 }
@@ -30,9 +31,6 @@ interface OctokitWithContent {
         path: string
         ref: string
       }) => Promise<{ data?: unknown }>
-    }
-    users?: {
-      getAuthenticated?: () => Promise<{ data: { login: string } }>
     }
   }
 }
@@ -140,10 +138,7 @@ export async function fetchFilePatch(
 }
 
 export async function runReplyReview(deps: ReplyDeps): Promise<ReplyResult> {
-  const client = deps.octokit as unknown as OctokitWithContent
-  const authRes = await client.rest?.users?.getAuthenticated?.()
-  const own = authRes?.data?.login
-  if (deps.commentAuthor === own) {
+  if (deps.commentBody.includes(COMMENT_MARKER)) {
     return { outcome: 'skipped', reason: 'self' }
   }
 
@@ -163,6 +158,9 @@ export async function runReplyReview(deps: ReplyDeps): Promise<ReplyResult> {
   }
   if (!root.body.includes(COMMENT_MARKER)) {
     return { outcome: 'skipped', reason: 'not-bot-thread' }
+  }
+  if (deps.commentAuthor === root.author) {
+    return { outcome: 'skipped', reason: 'self' }
   }
 
   const patch = await fetchFilePatch(deps.octokit, deps.repo, deps.prNumber, root.path)
