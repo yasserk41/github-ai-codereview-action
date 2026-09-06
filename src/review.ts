@@ -104,7 +104,22 @@ export async function runReview(deps: ReviewDeps): Promise<ReviewResult> {
     }
   }
 
-  await postReview(deps.octokit, deps.repo, deps.prNumber, body, event, inline)
+  try {
+    await postReview(deps.octokit, deps.repo, deps.prNumber, body, event, inline)
+  } catch (err) {
+    if (
+      event === 'APPROVE' &&
+      err instanceof Error &&
+      err.message.includes('not permitted to approve')
+    ) {
+      core.warning(
+        'GitHub forbids token-based PR approvals; submitting the review as COMMENT instead. Use a PAT or GitHub App token via github-token to submit real approvals.',
+      )
+      await postReview(deps.octokit, deps.repo, deps.prNumber, body, 'COMMENT', inline)
+    } else {
+      throw err
+    }
+  }
 
   return {
     findingsCount: inline.length + summaryOnly.length,

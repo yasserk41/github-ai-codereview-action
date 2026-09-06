@@ -245,4 +245,16 @@ describe('runReview', () => {
     expect(review.event).toBe('APPROVE')
     expect(review.comments).toEqual([])
   })
+
+  it('falls back to COMMENT when GitHub rejects token-based approvals', async () => {
+    const { octokit, createReview } = fakeOctokit()
+    createReview
+      .mockRejectedValueOnce(new Error('HttpError: Unprocessable Entity: "GitHub Actions is not permitted to approve pull requests."'))
+      .mockResolvedValueOnce({})
+    const result = await runReview(deps(fakeProvider([]), octokit, { verdict: 'auto' }))
+    expect(result).toEqual({ findingsCount: 0, inlineCount: 0, summaryOnlyCount: 0, verdict: 'approved', resolvedThreads: 0 })
+    expect(createReview).toHaveBeenCalledTimes(2)
+    expect(createReview.mock.calls[0][0].event).toBe('APPROVE')
+    expect(createReview.mock.calls[1][0].event).toBe('COMMENT')
+  })
 })
